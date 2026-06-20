@@ -1,36 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SpaceIN CRM (Next.js)
 
-## Getting Started
+Modern rebuild of Space IN Business Center CRM.
 
-First, run the development server:
+## Stack
+
+- **Next.js 16** + TypeScript + Tailwind + shadcn/ui
+- **NextAuth** (credentials via `crm_users` in Supabase)
+- **Supabase Postgres** (clients, activity log, offices, settings)
+
+## First-time Supabase setup
+
+### 1. Environment variables
+
+Copy `.env.example` → `.env.local` and fill in your Supabase + auth values.
+
+`DATABASE_URL` password must be URL-encoded (`@` → `%40`).
+
+### 2. Create tables
+
+**Option A — CLI (if direct DB connection works):**
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run db:setup
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**Option B — Supabase Dashboard (if migrate fails):**
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Open [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql)
+2. Paste and run `supabase/migrations/001_initial.sql`
+3. Then run `supabase/migrations/002_admin_root.sql`
+4. Then seed data:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run db:seed
+```
 
-## Learn More
+### 3. Run the app
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm install
+npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Open http://localhost:3000
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Demo login (after seed)
 
-## Deploy on Vercel
+| Email | Password | Role |
+|-------|----------|------|
+| admin@spacein.bh | admin123 | Root admin |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Additional administrators can be created under **Settings → Administrators** (admin-only).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Staff accounts can be created under **Settings → Staff**.
+
+## Deploy (Vercel)
+
+1. Root directory: `web`
+2. Environment variables:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `AUTH_SECRET`
+   - `AUTH_URL` (your production URL)
+3. Run migration + seed against production DB once
+
+## Phase status
+
+- [x] Phase 1 — App shell, auth, core CRM pages
+- [x] Phase 2a — Supabase schema, server actions, auth users in DB
+- [x] Phase 2b — Analytics, Offices, CR & Contracts, invoices/comms
+- [x] Phase 3 — A4 PDF, Resend email, WhatsApp Cloud API (with fallbacks)
+
+## Email & WhatsApp setup
+
+### Resend (recommended)
+
+1. Create an account at [resend.com](https://resend.com)
+2. Verify your sending domain (or use Resend's test domain in dev)
+3. Add to `.env.local`:
+   - `RESEND_API_KEY`
+   - `RESEND_FROM_EMAIL` — e.g. `Space IN <billing@yourdomain.com>`
+   - `RESEND_REPLY_TO` — optional, defaults to `Spacein.bh@gmail.com`
+
+Without Resend, the app logs the email and opens your mail client.
+
+### WhatsApp Business Cloud API
+
+1. Create a [Meta Developer](https://developers.facebook.com/) app with WhatsApp product
+2. Add a business phone number and get a permanent access token
+3. Add to `.env.local`:
+   - `WHATSAPP_ACCESS_TOKEN`
+   - `WHATSAPP_PHONE_NUMBER_ID` (from WhatsApp → API Setup)
+   - `WHATSAPP_API_VERSION` — optional, defaults to `v21.0`
+
+Without these, WhatsApp opens a `wa.me` link (manual send from the user's phone).
+
+### A4 invoices / PDF
+
+Click **Print / Save PDF (A4)** on any invoice or receipt. A new window opens with a true **210×297mm A4** layout — use the browser's **Save as PDF** with paper size **A4**.
+
+## Legacy
+
+`../SpaceIN_CRM_v2.html` is deprecated.

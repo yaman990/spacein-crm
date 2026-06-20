@@ -1,0 +1,882 @@
+{
+  "bank5": {
+    "label": "Floor 5 — Bank Flat",
+    "sections": [
+      {
+        "title": "Open Offices",
+        "offices": [
+          {
+            "no": "529",
+            "st": "rented",
+            "co": "ITHRA GENERAL TRADING W.L.L"
+          },
+          {
+            "no": "530",
+            "st": "rented",
+            "co": "SANOS TRADING COMPANY W.L.L"
+          },
+          {
+            "no": "531",
+            "st": "rented",
+            "co": "ALHASAFA CONSULTATIONS CO. W.L.L"
+          },
+          {
+            "no": "503",
+            "st": "rented",
+            "co": "FANAR AL MAEMURA TRADING PARTNERSHIP COMPANY"
+          },
+          {
+            "no": "504",
+            "st": "rented",
+            "co": "HUD SYSTEMS W.L.L"
+          },
+          {
+            "no": "505",
+            "st": "rented",
+            "co": "ZERONE TECHNOLOGY W.L.L"
+          },
+          {
+            "no": "506",
+            "st": "rented",
+            "co": "ALMOTAHEDON FOR ELECTRICAL PRODUCTS TRADING CO. W.L.L"
+          },
+          {
+            "no": "507",
+            "st": "rented",
+            "co": "WHITE LIGHT TRADING"
+          },
+          {
+            "no": "508",
+            "st": "rented",
+            "co": "NAWAH PROPERTIES W.L.L"
+          },
+          {
+            "no": "509",
+            "st": "rented",
+            "co": "WENAM CONSULTING SERVICES W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office with view",
+        "offices": [
+          {
+            "no": "549",
+            "st": "rented",
+            "co": "FIRST KEREN GENERAL TRADING COMPANY W.L.L"
+          },
+          {
+            "no": "523",
+            "st": "rented",
+            "co": "PERFECT CARE TRADING CO. W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Big Closed Office with view",
+        "offices": [
+          {
+            "no": "519",
+            "st": "rented",
+            "co": "NEXORA QUALITY SYSTEMS W.L.L"
+          },
+          {
+            "no": "520",
+            "st": "rented",
+            "co": "STAY CONNECTED FOR COLLECTION AGENCIES CO. W.L.L"
+          },
+          {
+            "no": "521",
+            "st": "rented",
+            "co": "STAY CONNECTED FOR COLLECTION AGENCIES CO. W.L.L"
+          },
+          {
+            "no": "524",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "525",
+            "st": "rented",
+            "co": "ANEES ALQULAIHI CONSTRUCTION"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office without view",
+        "offices": [
+          {
+            "no": "510",
+            "st": "rented",
+            "co": ""
+          },
+          {
+            "no": "511",
+            "st": "rented",
+            "co": "M L CONSULTING W.L.L"
+          },
+          {
+            "no": "512",
+            "st": "rented",
+            "co": "CMTC FOR GENERAL CONTRACTING W.L.L"
+          },
+          {
+            "no": "548",
+            "st": "rented",
+            "co": "4S MANAGEMENT AND CONSULTING SERVICES W.L.L"
+          },
+          {
+            "no": "527",
+            "st": "rented",
+            "co": "SPECIAL TECH CO. W.L.L"
+          },
+          {
+            "no": "528",
+            "st": "rented",
+            "co": "SIENCES AND SUPPLY ONLINE MARKETING CO. W.L.L"
+          },
+          {
+            "no": "559",
+            "st": "rented",
+            "co": "GREEN INVESTMENT HOLDING W.L.L"
+          },
+          {
+            "no": "522",
+            "st": "rented",
+            "co": "HAMMAD FOR BUSINESS SOLUTIONS CO. W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Big Closed Office without view",
+        "offices": [
+          {
+            "no": "513",
+            "st": "rented",
+            "co": "Javed Iqbal Muhammad Sadiq"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office with SIDE view",
+        "offices": [
+          {
+            "no": "516",
+            "st": "rented",
+            "co": "PNX INTERNATIONAL W.L.L"
+          },
+          {
+            "no": "517",
+            "st": "rented",
+            "co": "CLICK MEDIA W.L.L"
+          },
+          {
+            "no": "518",
+            "st": "rented",
+            "co": "TAYEB AL JAMAL REAL ESTATE BAHRAINI PARTNERSHIP COMPANY"
+          }
+        ]
+      },
+      {
+        "title": "Big Closed Office with SIDE view",
+        "offices": [
+          {
+            "no": "—",
+            "st": "restricted",
+            "co": "Meeting Room"
+          }
+        ]
+      }
+    ]
+  },
+  "rec5": {
+    "label": "Floor 5 — Reception Flat",
+    "sections": [
+      {
+        "title": "Open Offices",
+        "offices": [
+          {
+            "no": "532",
+            "st": "rented",
+            "co": "WESTERN CURRENT DWC W.L.L"
+          },
+          {
+            "no": "533",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "534",
+            "st": "rented",
+            "co": "BUSINESS TECHNOLOGY CO W.L.L"
+          },
+          {
+            "no": "535",
+            "st": "rented",
+            "co": "BE SAFE FOR SAFETY AND ENVIRONMENTAL CONSULTANCY"
+          },
+          {
+            "no": "536",
+            "st": "rented",
+            "co": "MAAREJ COMPANY FOR SYSTEMS DEVELOPMENT W.L.L"
+          },
+          {
+            "no": "537",
+            "st": "rented",
+            "co": "YJ INTERNATIONAL FOR MODERN LOGISTICS SERVICES CO. W.L.L"
+          },
+          {
+            "no": "538",
+            "st": "rented",
+            "co": "HIGH-END CONTRACTING"
+          },
+          {
+            "no": "514",
+            "st": "rented",
+            "co": "HOUSE OF CONSULTING OFFICE"
+          },
+          {
+            "no": "524",
+            "st": "rented",
+            "co": "TAKWEEN CONTRACTING W.L.L"
+          },
+          {
+            "no": "541",
+            "st": "rented",
+            "co": "FEXPOO CONFERENCE ORGANIZING COMPANY W.L.L"
+          },
+          {
+            "no": "542",
+            "st": "rented",
+            "co": "SAUDI GEOPHYSICAL CONSULTING OFFICE COMPANY"
+          },
+          {
+            "no": "543",
+            "st": "rented",
+            "co": "JVS MEDIA W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office with view",
+        "offices": [
+          {
+            "no": "551",
+            "st": "rented",
+            "co": "ISA SAIF ABDULLA SAIF BUHENAIDI"
+          },
+          {
+            "no": "552",
+            "st": "rented",
+            "co": "ALRAEES MAINTENANCE AND CONSTRUCTION"
+          },
+          {
+            "no": "553",
+            "st": "rented",
+            "co": "WELL PATH PUBLICITY AND ADVERTISING COMPANY W.L.L"
+          },
+          {
+            "no": "—",
+            "st": "rented",
+            "co": "AHMED MOHAMED AHMED SAYED"
+          },
+          {
+            "no": "555",
+            "st": "rented",
+            "co": "KNOWLEDGE CIRCLE CONSULTING W.L.L"
+          },
+          {
+            "no": "556",
+            "st": "rented",
+            "co": "KNOWLEDGE MANAGEMENT CENTER (KMC) W.L.L"
+          },
+          {
+            "no": "557",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "558",
+            "st": "rented",
+            "co": "HANAN ABDULAZIZ HABIB ABDULLA"
+          },
+          {
+            "no": "554",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "539",
+            "st": "rented",
+            "co": "ALMANSOORA PALACE CO. W.L.L"
+          },
+          {
+            "no": "—",
+            "st": "restricted",
+            "co": "Manager Office"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office without view",
+        "offices": [
+          {
+            "no": "550",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "545",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "546",
+            "st": "rented",
+            "co": "MIRAMAR LOGISTICS W.L.L"
+          },
+          {
+            "no": "547",
+            "st": "rented",
+            "co": "ELSHENAWY FOR MEDICAL SERVICES - BAHRAINI PARTNERSHIP COMPANY"
+          }
+        ]
+      },
+      {
+        "title": "Big Closed Office with view",
+        "offices": [
+          {
+            "no": "544",
+            "st": "unrented",
+            "co": ""
+          }
+        ]
+      }
+    ]
+  },
+  "round5": {
+    "label": "Floor 5 — Round Flat",
+    "sections": [
+      {
+        "title": "Open Offices Without View",
+        "offices": [
+          {
+            "no": "537",
+            "st": "rented",
+            "co": "HESHAM ABOUSHAWARIB FOR PUBLICITY AND ADVERTISING CO. W.L.L"
+          },
+          {
+            "no": "540",
+            "st": "rented",
+            "co": "DIRECT STORE CO. W.L.L"
+          },
+          {
+            "no": "564",
+            "st": "rented",
+            "co": "GLOBAL FIELD COMPANY FOR ENERGY SERVICES W.L.L"
+          },
+          {
+            "no": "461",
+            "st": "rented",
+            "co": "ALFANOOS COFFEE LIMITED BRANCH OF A FOREIGN COMPANY"
+          },
+          {
+            "no": "462",
+            "st": "rented",
+            "co": "KANZAN INTERNATIONAL CO. LTD W.L.L"
+          },
+          {
+            "no": "463",
+            "st": "rented",
+            "co": "KEPLER INTERIORS W.L.L"
+          },
+          {
+            "no": "464",
+            "st": "rented",
+            "co": "AL DHIFFAH VENTURES W.L.L"
+          },
+          {
+            "no": "498",
+            "st": "rented",
+            "co": "LIDIANA CONSULTING W.L.L"
+          },
+          {
+            "no": "456",
+            "st": "rented",
+            "co": "FEELS DIGITAL PRODUCTIONS W.L.L"
+          },
+          {
+            "no": "493",
+            "st": "rented",
+            "co": "FAMILY AVENEW W.L.L"
+          },
+          {
+            "no": "495",
+            "st": "rented",
+            "co": "TWANA W.L.L"
+          },
+          {
+            "no": "496",
+            "st": "rented",
+            "co": "BLACK TIE SERVICE"
+          },
+          {
+            "no": "497",
+            "st": "rented",
+            "co": "GAMAL EL MOUGI FOR MARKETING CO. W.L.L"
+          },
+          {
+            "no": "455",
+            "st": "rented",
+            "co": "ALNASRI TRADING COMPANY W.L.L"
+          },
+          {
+            "no": "465",
+            "st": "rented",
+            "co": "ARGO NAFS VI LIMITED BRANCH OF A FOREIGN COMPANY"
+          },
+          {
+            "no": "466",
+            "st": "rented",
+            "co": "ARGO NAFS VII LIMITED BRANCH OF A FOREIGN COMPANY"
+          },
+          {
+            "no": "467",
+            "st": "rented",
+            "co": "EH COATINGS W.L.L"
+          },
+          {
+            "no": "469",
+            "st": "rented",
+            "co": "BROOKFIELD REAL ESTATE"
+          },
+          {
+            "no": "470",
+            "st": "rented",
+            "co": "WAYSTAR GLOBAL GENERAL SERVICES CO. W.L.L"
+          },
+          {
+            "no": "471",
+            "st": "rented",
+            "co": "BRISTOL DIGITAL SERVICES CO. W.L.L"
+          },
+          {
+            "no": "472",
+            "st": "rented",
+            "co": "DEVELOPMENT EXPERTS FOR MODERN WOOD WORKS CO. W.L.L"
+          },
+          {
+            "no": "473",
+            "st": "rented",
+            "co": "ATTA FOR SUPPORTING TECHNOLOGIES W.L.L"
+          },
+          {
+            "no": "454",
+            "st": "rented",
+            "co": "ELSABRY SERVICES W.L.L"
+          },
+          {
+            "no": "487",
+            "st": "rented",
+            "co": "HTR ANALYTIQ CO. W.L.L"
+          },
+          {
+            "no": "474",
+            "st": "rented",
+            "co": "POSITIVE FOOD COMPANY W.L.L"
+          },
+          {
+            "no": "475",
+            "st": "rented",
+            "co": "EURO EQUITY W.L.L"
+          },
+          {
+            "no": "476",
+            "st": "rented",
+            "co": "ALEBTEKAR FOR ADMINISTRATIVE SERVICE W.L.L"
+          },
+          {
+            "no": "477",
+            "st": "rented",
+            "co": "TAJONSS TRADING & CONSULTANCY W.L.L"
+          },
+          {
+            "no": "478",
+            "st": "rented",
+            "co": "AADHIS INTERNATIONAL W.L.L"
+          },
+          {
+            "no": "479",
+            "st": "rented",
+            "co": "SPORTNAA FOOTBALL AGENCY W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Open Offices With View",
+        "offices": [
+          {
+            "no": "571",
+            "st": "rented",
+            "co": "DREAMS WORLD MARKETING CO. W.L.L"
+          },
+          {
+            "no": "572",
+            "st": "rented",
+            "co": "ONPOINT KNOWLEDGE AND STRATEGY CONSULTING W.L.L"
+          },
+          {
+            "no": "573",
+            "st": "rented",
+            "co": "KAYAN ALBADIYA W.L.L"
+          },
+          {
+            "no": "574",
+            "st": "rented",
+            "co": "ABDULMAJEED ALANDAQ W.L.L"
+          },
+          {
+            "no": "575",
+            "st": "rented",
+            "co": "BENAA CONTRACTING W.L.L"
+          },
+          {
+            "no": "576",
+            "st": "rented",
+            "co": "AQUA UNIVERSE W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office with Sea view",
+        "offices": [
+          {
+            "no": "582",
+            "st": "rented",
+            "co": "BATTANICA LOGISTICS SOLUTIONS CONSULTANCY W.L.L"
+          },
+          {
+            "no": "578",
+            "st": "rented",
+            "co": "AL GURG SMOLLAN W.L.L"
+          },
+          {
+            "no": "579",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "585",
+            "st": "rented",
+            "co": "MUSTAFA MWAFFAQ BAKR KHATTAB"
+          },
+          {
+            "no": "581",
+            "st": "rented",
+            "co": "F.J.A SPECIAL W.L.L"
+          },
+          {
+            "no": "593",
+            "st": "rented",
+            "co": "VVA HOLDING W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office with City view",
+        "offices": [
+          {
+            "no": "587",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "588",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "589",
+            "st": "unrented",
+            "co": ""
+          }
+        ]
+      },
+      {
+        "title": "Big Closed Office with City view",
+        "offices": [
+          {
+            "no": "583",
+            "st": "rented",
+            "co": "IBLOCKCHAIN W.L.L"
+          },
+          {
+            "no": "584",
+            "st": "rented",
+            "co": "SSPP SERVICES W.L.L"
+          },
+          {
+            "no": "590",
+            "st": "rented",
+            "co": "GULF FOUNDATION FOR GENERAL TRADING"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office without view",
+        "offices": [
+          {
+            "no": "563",
+            "st": "unrented",
+            "co": ""
+          }
+        ]
+      }
+    ]
+  },
+  "round4": {
+    "label": "Floor 4 — Round Flat",
+    "sections": [
+      {
+        "title": "Open Offices Without View",
+        "offices": [
+          {
+            "no": "459",
+            "st": "rented",
+            "co": "JOUD INFORMATION AND MANAGEMENT CONSULTING W.L.L"
+          },
+          {
+            "no": "460",
+            "st": "rented",
+            "co": "AL SHERIFFA COMPANY W.L.L"
+          },
+          {
+            "no": "461",
+            "st": "rented",
+            "co": "SHATHR CONFERENCES AND EVENTS W.L.L"
+          },
+          {
+            "no": "462",
+            "st": "rented",
+            "co": "KANZAN INTERNATIONAL CO. LTD W.L.L"
+          },
+          {
+            "no": "463",
+            "st": "rented",
+            "co": "KEPLER INTERIORS W.L.L"
+          },
+          {
+            "no": "464",
+            "st": "rented",
+            "co": "AL DHIFFAH VENTURES W.L.L"
+          },
+          {
+            "no": "498",
+            "st": "rented",
+            "co": "LIDIANA CONSULTING W.L.L"
+          },
+          {
+            "no": "457",
+            "st": "rented",
+            "co": "FEELS DIGITAL PRODUCTIONS W.L.L"
+          },
+          {
+            "no": "493",
+            "st": "rented",
+            "co": "FAMILY AVENEW W.L.L"
+          },
+          {
+            "no": "495",
+            "st": "rented",
+            "co": "TWANA W.L.L"
+          },
+          {
+            "no": "496",
+            "st": "rented",
+            "co": "BLACK TIE SERVICE"
+          },
+          {
+            "no": "497",
+            "st": "rented",
+            "co": "GAMAL EL MOUGI FOR MARKETING CO. W.L.L"
+          },
+          {
+            "no": "455",
+            "st": "rented",
+            "co": "ALNASRI TRADING COMPANY W.L.L"
+          },
+          {
+            "no": "465",
+            "st": "rented",
+            "co": "ARGO NAFS VI LIMITED BRANCH OF A FOREIGN COMPANY"
+          },
+          {
+            "no": "466",
+            "st": "rented",
+            "co": "ARGO NAFS VII LIMITED BRANCH OF A FOREIGN COMPANY"
+          },
+          {
+            "no": "467",
+            "st": "rented",
+            "co": "EH COATINGS W.L.L"
+          },
+          {
+            "no": "469",
+            "st": "rented",
+            "co": "BROOKFIELD REAL ESTATE"
+          },
+          {
+            "no": "470",
+            "st": "rented",
+            "co": "WAYSTAR GLOBAL GENERAL SERVICES CO. W.L.L"
+          },
+          {
+            "no": "471",
+            "st": "rented",
+            "co": "BRISTOL DIGITAL SERVICES CO. W.L.L"
+          },
+          {
+            "no": "472",
+            "st": "rented",
+            "co": "DEVELOPMENT EXPERTS FOR MODERN WOOD WORKS CO. W.L.L"
+          },
+          {
+            "no": "473",
+            "st": "rented",
+            "co": "ATTA FOR SUPPORTING TECHNOLOGIES W.L.L"
+          },
+          {
+            "no": "454",
+            "st": "rented",
+            "co": "ELSABRY SERVICES W.L.L"
+          },
+          {
+            "no": "487",
+            "st": "rented",
+            "co": "HTR ANALYTIQ CO. W.L.L"
+          },
+          {
+            "no": "474",
+            "st": "rented",
+            "co": "POSITIVE FOOD COMPANY W.L.L"
+          },
+          {
+            "no": "475",
+            "st": "rented",
+            "co": "EURO EQUITY W.L.L"
+          },
+          {
+            "no": "476",
+            "st": "rented",
+            "co": "ALEBTEKAR FOR ADMINISTRATIVE SERVICE W.L.L"
+          },
+          {
+            "no": "477",
+            "st": "rented",
+            "co": "TAJONSS TRADING & CONSULTANCY W.L.L"
+          },
+          {
+            "no": "478",
+            "st": "rented",
+            "co": "AADHIS INTERNATIONAL W.L.L"
+          },
+          {
+            "no": "479",
+            "st": "rented",
+            "co": "SPORTNAA FOOTBALL AGENCY W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office with Sea view",
+        "offices": [
+          {
+            "no": "481",
+            "st": "rented",
+            "co": "GREENTEEK W.L.L"
+          },
+          {
+            "no": "482",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "483",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "484",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "485",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "486",
+            "st": "rented",
+            "co": "RASHED NAJEM H. ALROWAIEI"
+          },
+          {
+            "no": "480",
+            "st": "rented",
+            "co": "UXUI PROGRAMMING SOLUTIONS"
+          },
+          {
+            "no": "—",
+            "st": "unrented",
+            "co": ""
+          }
+        ]
+      },
+      {
+        "title": "Closed Office with City view",
+        "offices": [
+          {
+            "no": "489",
+            "st": "rented",
+            "co": "VALOR MANPOWERL"
+          },
+          {
+            "no": "490",
+            "st": "rented",
+            "co": "TAEMIR CONTRACTING CO. W.L.L"
+          },
+          {
+            "no": "491",
+            "st": "unrented",
+            "co": ""
+          },
+          {
+            "no": "494",
+            "st": "rented",
+            "co": ""
+          }
+        ]
+      },
+      {
+        "title": "Big Closed Office with City view",
+        "offices": [
+          {
+            "no": "492",
+            "st": "rented",
+            "co": "TILKE AND PARTNERS W.L.L"
+          }
+        ]
+      },
+      {
+        "title": "Closed Office without view",
+        "offices": [
+          {
+            "no": "499",
+            "st": "unrented",
+            "co": "LOANDA TRADSERV - PARTNERSHIP CO."
+          }
+        ]
+      }
+    ]
+  }
+}
