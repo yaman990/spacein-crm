@@ -10,6 +10,7 @@ import type { Client } from "@/types/client";
 import type { OfficeStatus } from "@/types/office";
 import { PageHeader } from "@/components/layout/page-header";
 import { OfficeEditDialog } from "@/components/offices/office-edit-dialog";
+import { OfficeFloorPlan } from "@/components/offices/office-floor-plan";
 import { FloorManagerDialog } from "@/components/offices/floor-manager-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -64,6 +65,7 @@ export default function OfficesPage() {
     linkedClientName?: string;
   } | null>(null);
   const [floorMgrOpen, setFloorMgrOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"plan" | "table">("plan");
   const [statusFilter, setStatusFilter] = useState<OfficeStatus | "all">("all");
   const [search, setSearch] = useState("");
   const { sortKey, direction, toggleSort } = useTableSort<OfficeSortKey>(
@@ -188,17 +190,29 @@ export default function OfficesPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <PageHeader
           title="Office Management"
-          description="Floor 4 & Floor 5 — click any row to edit status"
+          description="Pick an office from the floor plan — like choosing a seat"
         />
-        <Button onClick={() => setFloorMgrOpen(true)}>
-          Manage Floors & Sections
-        </Button>
+        <div className="flex items-center gap-2">
+          <Tabs
+            value={viewMode}
+            onValueChange={(v) => setViewMode(v as "plan" | "table")}
+          >
+            <TabsList>
+              <TabsTrigger value="plan">Floor Plan</TabsTrigger>
+              <TabsTrigger value="table">Table</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button onClick={() => setFloorMgrOpen(true)}>
+            Manage Floors & Sections
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-        <strong className="text-foreground">How to edit:</strong> Click any row to
-        open the edit panel. When you add/edit a client with an office number,
-        that office updates automatically.{" "}
+        <strong className="text-foreground">How it works:</strong> Green offices are
+        available — click one to assign a company, just like picking a seat. Click
+        any office to edit its status. When you add/edit a client with an office
+        number, that office updates automatically.{" "}
         <Badge variant="secondary" className="ml-1 text-[0.65rem]">
           Linked
         </Badge>{" "}
@@ -279,6 +293,21 @@ export default function OfficesPage() {
         />
       </div>
 
+      {viewMode === "plan" ? (
+        <Card className="shadow-sm">
+          <CardContent className="p-4 sm:p-6">
+            <OfficeFloorPlan
+              sections={sectionsWithOffices}
+              selectedNo={
+                editTarget?.floorKey === activeFloor
+                  ? editTarget.officeNo
+                  : undefined
+              }
+              onSelect={(officeNo) => openEdit(activeFloor, officeNo)}
+            />
+          </CardContent>
+        </Card>
+      ) : (
       <div className="grid gap-4 xl:grid-cols-2">
         {sectionsWithOffices.map(({ title, sIdx, rows }) => (
           <Card key={`${activeFloor}-${sIdx}`} className="shadow-sm">
@@ -369,6 +398,7 @@ export default function OfficesPage() {
           </Card>
         ))}
       </div>
+      )}
 
       <OfficeEditDialog
         open={!!editTarget}
