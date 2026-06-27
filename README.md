@@ -23,7 +23,7 @@ Copy `.env.example` → `.env.local` and fill in your Supabase + auth values.
 ```bash
 npm run db:setup
 ```
-
+rwrr
 **Option B — Supabase Dashboard (if migrate fails):**
 
 1. Open [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql)
