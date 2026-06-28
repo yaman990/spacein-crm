@@ -1,6 +1,27 @@
 import type { Client } from "@/types/client";
 import type { FloorsMap, OfficeOverrides, OfficeStatus } from "@/types/office";
 
+export type OfficeCategory = "open" | "closed" | "big";
+
+export const OFFICE_CATEGORY_LABELS: Record<OfficeCategory, string> = {
+  open: "Open Offices",
+  closed: "Closed Offices",
+  big: "Big Closed Offices",
+};
+
+/**
+ * Derives a broad office category from a section title. The section titles in
+ * the floor data ("Open Offices", "Closed Office with Sea view", "Big Closed
+ * Office …") encode the office type; we bucket them so the category filter is
+ * consistent across every floor regardless of view-specific wording.
+ */
+export function officeCategoryFromTitle(title: string): OfficeCategory {
+  const t = title.toLowerCase();
+  if (t.includes("big")) return "big";
+  if (t.includes("open")) return "open";
+  return "closed";
+}
+
 export function resolveOfficeStatus(
   floorKey: string,
   officeNo: string,
