@@ -3,7 +3,14 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useOffices } from "@/providers/crm-provider";
-import { globalOfficeStats, resolveOfficeCompany, resolveOfficeStatus } from "@/lib/office-stats";
+import {
+  globalOfficeStats,
+  resolveOfficeCompany,
+  resolveOfficeStatus,
+  officeCategoryFromTitle,
+  OFFICE_CATEGORY_LABELS,
+  type OfficeCategory,
+} from "@/lib/office-stats";
 import { sortOfficeRows, type OfficeSortKey } from "@/lib/table-sort";
 import { useTableSort } from "@/hooks/use-table-sort";
 import type { Client } from "@/types/client";
@@ -11,12 +18,24 @@ import type { OfficeStatus } from "@/types/office";
 import { PageHeader } from "@/components/layout/page-header";
 import { OfficeEditDialog } from "@/components/offices/office-edit-dialog";
 import { OfficeFloorPlan } from "@/components/offices/office-floor-plan";
+import {
+  OfficeFloorMap,
+  type OfficeInfo,
+} from "@/components/offices/office-floor-map";
+import { FLOOR5_LAYOUT } from "@/data/floor5-layout";
 import { FloorManagerDialog } from "@/components/offices/floor-manager-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
 import { OfficeStatusIndicator } from "@/components/offices/office-status-indicator";
 import {
@@ -67,6 +86,9 @@ export default function OfficesPage() {
   const [floorMgrOpen, setFloorMgrOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"plan" | "table">("plan");
   const [statusFilter, setStatusFilter] = useState<OfficeStatus | "all">("all");
+  const [categoryFilter, setCategoryFilter] = useState<OfficeCategory | "all">(
+    "all",
+  );
   const [search, setSearch] = useState("");
   const { sortKey, direction, toggleSort } = useTableSort<OfficeSortKey>(
     "no",
@@ -84,7 +106,14 @@ export default function OfficesPage() {
     if (!currentFloor) return [];
     const q = search.toLowerCase().trim();
 
-    return currentFloor.sections.map((sec, sIdx) => {
+    return currentFloor.sections
+      .map((sec, sIdx) => ({ sec, sIdx }))
+      .filter(
+        ({ sec }) =>
+          categoryFilter === "all" ||
+          officeCategoryFromTitle(sec.title) === categoryFilter,
+      )
+      .map(({ sec, sIdx }) => {
       let rows: ResolvedOfficeRow[] = sec.offices.map((o, oIdx) => {
         const st = resolveOfficeStatus(
           activeFloor,
@@ -133,7 +162,52 @@ export default function OfficesPage() {
     sortKey,
     direction,
     statusFilter,
+    categoryFilter,
   ]);
+
+  const hasFloorPlan = activeFloor === "floor5";
+
+  // Full, unfiltered status/company for every office on the floor — used to
+  // position and colour the CAD floor map.
+  const officeInfo = useMemo(() => {
+    const map = new Map<string, OfficeInfo>();
+    if (!currentFloor) return map;
+    currentFloor.sections.forEach((sec) =>
+      sec.offices.forEach((o) => {
+        const status = resolveOfficeStatus(
+          activeFloor,
+          o.no,
+          o.st,
+          officeOverrides,
+        );
+        const { company, linkedClient } = resolveOfficeCompany(
+          activeFloor,
+          o.no,
+          o.co,
+          officeOverrides,
+          clients,
+        );
+        map.set(o.no, {
+          status,
+          company,
+          linkedClient: linkedClient ?? undefined,
+        });
+      }),
+    );
+    return map;
+  }, [activeFloor, currentFloor, officeOverrides, clients]);
+
+  // Office numbers passing the active filters — highlighted on the map.
+  const matchedNos = useMemo(() => {
+    const set = new Set<string>();
+    sectionsWithOffices.forEach((sec) =>
+      sec.rows.forEach((r) => set.add(r.no)),
+    );
+    return set;
+  }, [sectionsWithOffices]);
+
+  const filtersActive =
+    statusFilter !== "all" || categoryFilter !== "all" || search.trim() !== "";
 
   function openEdit(floorKey: string, officeNo: string) {
     const floor = floors[floorKey];
@@ -273,18 +347,38 @@ export default function OfficesPage() {
         </TabsList>
       </Tabs>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Tabs
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as OfficeStatus | "all")}
-        >
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="rented">Rented</TabsTrigger>
-            <TabsTrigger value="unrented">Free</TabsTrigger>
-            <TabsTrigger value="restricted">Restricted</TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Tabs
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as OfficeStatus | "all")}
+          >
+            <TabsList>
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="rented">Rented</TabsTrigger>
+              <TabsTrigger value="unrented">Free</TabsTrigger>
+              <TabsTrigger value="restricted">Restricted</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Select
+            value={categoryFilter}
+            onValueChange={(v) => setCategoryFilter(v as OfficeCategory | "all")}
+          >
+            <SelectTrigger className="w-full sm:w-52">
+              <SelectValue placeholder="All categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All categories</SelectItem>
+              {(Object.keys(OFFICE_CATEGORY_LABELS) as OfficeCategory[]).map(
+                (cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {OFFICE_CATEGORY_LABELS[cat]}
+                  </SelectItem>
+                ),
+              )}
+            </SelectContent>
+          </Select>
+        </div>
         <Input
           placeholder="Search office or company…"
           value={search}
@@ -296,15 +390,30 @@ export default function OfficesPage() {
       {viewMode === "plan" ? (
         <Card className="shadow-sm">
           <CardContent className="p-4 sm:p-6">
-            <OfficeFloorPlan
-              sections={sectionsWithOffices}
-              selectedNo={
-                editTarget?.floorKey === activeFloor
-                  ? editTarget.officeNo
-                  : undefined
-              }
-              onSelect={(officeNo) => openEdit(activeFloor, officeNo)}
-            />
+            {hasFloorPlan ? (
+              <OfficeFloorMap
+                layout={FLOOR5_LAYOUT}
+                officeInfo={officeInfo}
+                matchedNos={matchedNos}
+                filtersActive={filtersActive}
+                selectedNo={
+                  editTarget?.floorKey === activeFloor
+                    ? editTarget.officeNo
+                    : undefined
+                }
+                onSelect={(officeNo) => openEdit(activeFloor, officeNo)}
+              />
+            ) : (
+              <OfficeFloorPlan
+                sections={sectionsWithOffices}
+                selectedNo={
+                  editTarget?.floorKey === activeFloor
+                    ? editTarget.officeNo
+                    : undefined
+                }
+                onSelect={(officeNo) => openEdit(activeFloor, officeNo)}
+              />
+            )}
           </CardContent>
         </Card>
       ) : (
