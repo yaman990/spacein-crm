@@ -1,7 +1,7 @@
 # SpaceIN CRM (Next.js)
 
 Modern rebuild of Space IN Business Center CRM.
-test
+
 ## Stack
 
 - **Next.js 16** + TypeScript + Tailwind + shadcn/ui
