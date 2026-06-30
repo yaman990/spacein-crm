@@ -1,9 +1,10 @@
 /**
- * Schematic floor-plan layout for Floor 5, derived from the architectural CAD
- * drawings (All FlaT / FlaT 2 / FlaT 3). Offices are placed in their real
- * relative arrangement — the left open-plan cluster + perimeter (501–531), the
- * middle double-loaded corridor with reception (532–561), and the curved end
- * (562–599) — rather than to exact mm scale. Coordinates are in viewBox units.
+ * Schematic floor-plan layout for Floor 5, traced from the architectural CAD
+ * drawing (All FlaT). The real floor is one long, narrow, double-loaded
+ * corridor: offices packed on both sides of a single spine, with a central
+ * open-plan island at one end (501–509) and a rounded/curved end at the other
+ * (562–599). Rendered horizontally (the drawing rotated 90°) to fit the screen.
+ * Coordinates are in viewBox units.
  */
 
 export interface OfficeRect {
@@ -40,26 +41,28 @@ const range = (a: number, b: number): string[] => {
   return out;
 };
 
-function col(
-  nos: string[],
-  x: number,
-  yStart: number,
-  w: number,
-  h: number,
-  gap = 6,
-): OfficeRect[] {
-  return nos.map((no, i) => ({ no, x, y: yStart + i * (h + gap), w, h }));
-}
-
+// a horizontal run of offices (left → right)
 function row(
   nos: string[],
   y: number,
   xStart: number,
   w: number,
   h: number,
-  gap = 6,
+  gap = 4,
 ): OfficeRect[] {
   return nos.map((no, i) => ({ no, x: xStart + i * (w + gap), y, w, h }));
+}
+
+// a vertical stack of offices (top → bottom)
+function col(
+  nos: string[],
+  x: number,
+  yStart: number,
+  w: number,
+  h: number,
+  gap = 4,
+): OfficeRect[] {
+  return nos.map((no, i) => ({ no, x, y: yStart + i * (h + gap), w, h }));
 }
 
 function arc(
@@ -85,59 +88,71 @@ function arc(
   });
 }
 
-// --- ZONE A: open-plan cluster + perimeter (501–531) ---------------------
-const zoneA: OfficeRect[] = [
-  // central open-plan cluster — two columns
-  ...col(["501", "502", "503", "504", "505"], 250, 112, 80, 64), // right column
-  ...col(["509", "508", "507", "506"], 160, 184, 80, 64), // left column
-  // left wall
-  ...col(range(510, 515), 24, 96, 56, 70),
-  // right wall of the cluster (524 top → 519 bottom)
-  ...col(["524", "523", "522", "521", "520", "519"], 372, 96, 56, 70),
-  // top wall (529 standalone near wash area, then 525–528)
-  ...row(["529", "525", "526", "527", "528"], 40, 90, 56, 44),
-  // bottom wall
-  ...row(["530", "516", "517", "518"], 528, 90, 56, 44),
-  // 531 — corner office on the left edge
-  { no: "531", x: 24, y: 40, w: 56, h: 44 },
+// office cell sizes
+const NW = 46; // north/south office width
+const NH = 62; // north/south office height
+const NORTH_Y = 70;
+const SOUTH_Y = 312;
+
+// =========================================================================
+//  ZONE 1 — open-plan island end (501–531), far left
+// =========================================================================
+const islandLeft = col(["509", "508", "507", "506"], 150, 150, 66, 56); // inner col
+const islandRight = col(["501", "502", "503", "504", "505"], 222, 150, 66, 56);
+const leftWall = col(range(510, 515), 70, 70, 66, 56); // outer wall column
+const innerWall = col(["519", "520", "521", "522", "523", "524"], 300, 70, 66, 56);
+const topWall = row(["525", "526", "527", "528", "529"], 70, 380, NW, NH); // top edge
+const bottomWall = row(["516", "517", "518", "530", "531"], SOUTH_Y, 380, NW, NH);
+
+const zone1: OfficeRect[] = [
+  ...leftWall,
+  ...islandLeft,
+  ...islandRight,
+  ...innerWall,
+  ...topWall,
+  ...bottomWall,
 ];
 
-// --- ZONE B: double-loaded corridor + reception (532–561) ----------------
-const zoneB: OfficeRect[] = [
-  // inner block — two rows above the corridor
-  ...row(range(532, 539), 70, 470, 52, 78),
-  ...row(range(540, 547), 158, 470, 52, 78),
-  // junction offices near Zone A
-  ...row(["548", "549", "550"], 386, 470, 52, 64),
-  // window wall along the bottom edge
-  ...row(range(551, 561), 480, 470, 40, 90),
+// =========================================================================
+//  ZONE 2 — double-loaded corridor (532–561)
+// =========================================================================
+// north side (window wall) and south side (inner offices), packed both sides
+const zone2: OfficeRect[] = [
+  ...row(range(532, 546), NORTH_Y, 610, NW, NH), // 15 north
+  ...row(range(547, 561), SOUTH_Y, 610, NW, NH), // 15 south
 ];
 
-// --- ZONE C: round flat / curved end (562–599) ---------------------------
-// Per FlaT 1: a short straight approach (562–569) that bends into a rounded
-// corner with two concentric rings — inner offices (570–584) and the outer
-// curved window wall (585–599).
-const zoneC: OfficeRect[] = [
-  ...row(["562", "563", "564", "565"], 70, 1000, 46, 78), // approach, top
-  ...row(["566", "567", "568", "569"], 480, 1000, 46, 90), // approach, bottom
-  ...arc(range(570, 584), 1300, 300, 150, -86, 86, 40, 36), // inner ring
-  ...arc(range(585, 599), 1300, 300, 212, -86, 86, 48, 40), // outer window wall
+// =========================================================================
+//  ZONE 3 — rounded / curved end (562–599)
+// =========================================================================
+const APPROACH_X = 1370;
+const zone3: OfficeRect[] = [
+  ...row(["562", "563", "564", "565"], NORTH_Y, APPROACH_X, NW, NH),
+  ...row(["566", "567", "568", "569"], SOUTH_Y, APPROACH_X, NW, NH),
+  ...arc(range(570, 584), 1640, 197, 132, -88, 88, 42, 38), // inner ring
+  ...arc(range(585, 599), 1640, 197, 190, -90, 90, 48, 42), // outer window wall
 ];
 
 export const FLOOR5_LAYOUT: FloorLayout = {
-  width: 1600,
-  height: 640,
+  width: 1900,
+  height: 470,
+  offices: [...zone1, ...zone2, ...zone3],
   corridor: [
-    { x: 90, y: 96, w: 60, h: 456 }, // Zone A internal corridor
-    { x: 440, y: 250, w: 860, h: 84 }, // main spine through B & C
+    // U-shaped corridor wrapping the island
+    { x: 124, y: 132, w: 24, h: 196 }, // left of island
+    { x: 290, y: 132, w: 16, h: 196 }, // right of island
+    { x: 124, y: 132, w: 182, h: 18 }, // above island
+    { x: 124, y: 310, w: 182, h: 18 }, // below island
+    // main spine through zones 2 & 3
+    { x: 360, y: 196, w: 1290, h: 56 },
   ],
-  offices: [...zoneA, ...zoneB, ...zoneC],
   landmarks: [
-    { label: "Lifts", kind: "vertical", x: 414, y: 96, w: 44, h: 120 },
-    { label: "Toilets", kind: "service", x: 414, y: 40, w: 44, h: 48 },
-    { label: "Stairs", kind: "vertical", x: 414, y: 470, w: 44, h: 82 },
-    { label: "Print Room", kind: "room", x: 470, y: 250, w: 80, h: 84 },
-    { label: "Reception", kind: "reception", x: 600, y: 262, w: 150, h: 60 },
-    { label: "Meeting Room", kind: "room", x: 790, y: 262, w: 110, h: 60 },
+    { label: "Lifts", kind: "vertical", x: 380, y: 158, w: 46, h: 80 },
+    { label: "Stairs", kind: "vertical", x: 432, y: 158, w: 46, h: 80 },
+    { label: "Toilets", kind: "service", x: 484, y: 158, w: 46, h: 36 },
+    { label: "Void", kind: "service", x: 484, y: 200, w: 46, h: 38 },
+    { label: "Print Room", kind: "room", x: 560, y: 168, w: 44, h: 96 },
+    { label: "Reception", kind: "reception", x: 1130, y: 200, w: 130, h: 48 },
+    { label: "Meeting Room", kind: "room", x: 1276, y: 200, w: 90, h: 48 },
   ],
 };
