@@ -7,6 +7,10 @@ import { CrmProvider, type CrmSnapshot } from "@/providers/crm-provider";
 import type { FloorsMap } from "@/types/office";
 import { redirect } from "next/navigation";
 
+// Always render with live data — never serve a cached snapshot of the CRM.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const emptySnapshot: CrmSnapshot = {
   clients: [],
   activityLog: [],
