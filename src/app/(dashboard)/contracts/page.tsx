@@ -6,6 +6,7 @@ import { crContractStats } from "@/lib/contracts";
 import { exportCrCsv } from "@/lib/csv-export";
 import { PageHeader } from "@/components/layout/page-header";
 import { ContractsTable } from "@/components/contracts/contracts-table";
+import { LeaseReport } from "@/components/contracts/lease-report";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -43,6 +44,16 @@ export default function ContractsPage() {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold">
+          Lease contracts &amp; renewals
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Office contracts by expiry — search a client to see all their leases.
+        </p>
+        <LeaseReport />
       </div>
 
       <ContractsTable />

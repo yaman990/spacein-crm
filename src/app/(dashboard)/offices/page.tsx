@@ -665,6 +665,7 @@ export default function OfficesPage() {
         occupancy={detailOfficeNo ? occupancyByNo.get(detailOfficeNo) ?? null : null}
         invoices={invoices}
         clients={clients}
+        building={building}
         hasFreeSlot={
           detailOfficeNo
             ? (occupancyByNo.get(detailOfficeNo)?.hasFreeSlot ?? false)

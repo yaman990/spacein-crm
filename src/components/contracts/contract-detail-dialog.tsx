@@ -2,10 +2,11 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { FileText, Upload } from "lucide-react";
-import type { Contract, Invoice, ContractStatus } from "@/types/contract";
+import { FileText, Printer, Upload } from "lucide-react";
+import type { Building, Contract, Invoice, ContractStatus } from "@/types/contract";
 import type { Client } from "@/types/client";
 import type { OfficeOccupancy } from "@/lib/office-contracts";
+import { openContractPrintWindow } from "@/lib/document-print";
 import {
   Dialog,
   DialogContent,
@@ -30,6 +31,7 @@ export function ContractDetailDialog({
   occupancy,
   invoices,
   clients,
+  building,
   hasFreeSlot,
   onMarkPaid,
   getReceiptUrl,
@@ -42,6 +44,7 @@ export function ContractDetailDialog({
   occupancy: OfficeOccupancy | null;
   invoices: Invoice[];
   clients: Client[];
+  building: Building | null;
   hasFreeSlot: boolean;
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
@@ -77,6 +80,7 @@ export function ContractDetailDialog({
               getReceiptUrl={getReceiptUrl}
               onRenew={onRenew}
               onClose={onClose}
+              building={building}
             />
           ))}
 
@@ -99,6 +103,7 @@ function ContractCard({
   getReceiptUrl,
   onRenew,
   onClose,
+  building,
 }: {
   contract: Contract;
   client?: Client;
@@ -107,6 +112,7 @@ function ContractCard({
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   onRenew: (contractId: string) => Promise<void>;
   onClose: (contractId: string) => Promise<void>;
+  building: Building | null;
 }) {
   const meta = STATUS_META[contract.status];
   const [busy, setBusy] = useState<"renew" | "close" | null>(null);
@@ -170,6 +176,15 @@ function ContractCard({
       </div>
 
       <div className="mt-3 flex justify-end gap-2">
+        {client && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => openContractPrintWindow(contract, client, building)}
+          >
+            <Printer className="mr-1 size-3.5" /> Print contract
+          </Button>
+        )}
         {contract.status === "active" && (
           <Button
             size="sm"
