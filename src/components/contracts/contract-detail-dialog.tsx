@@ -33,6 +33,8 @@ export function ContractDetailDialog({
   hasFreeSlot,
   onMarkPaid,
   getReceiptUrl,
+  onRenew,
+  onClose,
   onAddContract,
 }: {
   open: boolean;
@@ -43,6 +45,8 @@ export function ContractDetailDialog({
   hasFreeSlot: boolean;
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  onRenew: (contractId: string) => Promise<void>;
+  onClose: (contractId: string) => Promise<void>;
   onAddContract: () => void;
 }) {
   if (!occupancy) return null;
@@ -71,6 +75,8 @@ export function ContractDetailDialog({
                 .sort((a, b) => (a.periodStart < b.periodStart ? -1 : 1))}
               onMarkPaid={onMarkPaid}
               getReceiptUrl={getReceiptUrl}
+              onRenew={onRenew}
+              onClose={onClose}
             />
           ))}
 
@@ -91,14 +97,46 @@ function ContractCard({
   invoices,
   onMarkPaid,
   getReceiptUrl,
+  onRenew,
+  onClose,
 }: {
   contract: Contract;
   client?: Client;
   invoices: Invoice[];
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  onRenew: (contractId: string) => Promise<void>;
+  onClose: (contractId: string) => Promise<void>;
 }) {
   const meta = STATUS_META[contract.status];
+  const [busy, setBusy] = useState<"renew" | "close" | null>(null);
+
+  async function renew() {
+    if (!window.confirm("Renew this contract for the next period?")) return;
+    setBusy("renew");
+    try {
+      await onRenew(contract.id);
+      toast.success("Contract renewed — new invoice issued (awaiting payment)");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Renew failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function close() {
+    if (!window.confirm("Close this contract and free the office?")) return;
+    setBusy("close");
+    try {
+      await onClose(contract.id);
+      toast.success("Contract closed — office is now available");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Close failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="rounded-lg border border-border p-3">
       <div className="flex items-start justify-between gap-2">
@@ -107,6 +145,7 @@ function ContractCard({
           <p className="text-xs text-muted-foreground">
             {contract.contractNo} · {contract.clientType} · {contract.months} mo ·{" "}
             {contract.startDate} → {contract.endDate}
+            {contract.renewalCount > 0 && ` · renewed ×${contract.renewalCount}`}
           </p>
         </div>
         <Badge className={meta.cls} variant="secondary">
@@ -128,6 +167,28 @@ function ContractCard({
             getReceiptUrl={getReceiptUrl}
           />
         ))}
+      </div>
+
+      <div className="mt-3 flex justify-end gap-2">
+        {contract.status === "active" && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={renew}
+          >
+            {busy === "renew" ? "Renewing…" : "Renew now"}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-destructive hover:text-destructive"
+          disabled={busy !== null}
+          onClick={close}
+        >
+          {busy === "close" ? "Closing…" : "Close contract"}
+        </Button>
       </div>
     </div>
   );

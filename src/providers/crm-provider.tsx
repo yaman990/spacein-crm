@@ -22,9 +22,11 @@ import {
   updateClientAction,
 } from "@/actions/crm";
 import {
+  closeContractAction,
   createContractAction,
   getReceiptUrlAction,
   markInvoicePaidAction,
+  renewContractAction,
   saveBuildingAction,
   saveOfficeDetailsAction,
   type CreateContractInput,
@@ -85,6 +87,8 @@ interface CrmContextValue extends CrmSnapshot {
   saveBuilding: (building: Omit<Building, "id"> & { id?: string }) => Promise<void>;
   markInvoicePaid: (invoiceId: string, receipt: File) => Promise<void>;
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  renewContract: (contractId: string) => Promise<void>;
+  closeContract: (contractId: string) => Promise<void>;
 }
 
 const CrmContext = createContext<CrmContextValue | null>(null);
@@ -258,6 +262,22 @@ export function CrmProvider({
     [],
   );
 
+  const renewContract = useCallback(
+    async (contractId: string) => {
+      await renewContractAction(contractId);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const closeContract = useCallback(
+    async (contractId: string) => {
+      await closeContractAction(contractId);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const value = useMemo<CrmContextValue>(
     () => ({
       clients,
@@ -286,6 +306,8 @@ export function CrmProvider({
       saveBuilding,
       markInvoicePaid,
       getReceiptUrl,
+      renewContract,
+      closeContract,
     }),
     [
       clients,
@@ -313,6 +335,8 @@ export function CrmProvider({
       saveBuilding,
       markInvoicePaid,
       getReceiptUrl,
+      renewContract,
+      closeContract,
     ],
   );
 
@@ -371,6 +395,8 @@ export function useOffices() {
     saveBuilding,
     markInvoicePaid,
     getReceiptUrl,
+    renewContract,
+    closeContract,
   } = useCrm();
   return {
     clients,
@@ -391,6 +417,8 @@ export function useOffices() {
     saveBuilding,
     markInvoicePaid,
     getReceiptUrl,
+    renewContract,
+    closeContract,
   };
 }
 

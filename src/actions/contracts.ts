@@ -126,6 +126,80 @@ export async function createContractAction(
   return contract;
 }
 
+/** Renew a contract: extend to the next period + issue its (unpaid) invoice. */
+export async function renewContractAction(contractId: string): Promise<void> {
+  await requireSession();
+  const supabase = createAdminClient();
+
+  const { data: row, error } = await supabase
+    .from("contracts")
+    .select("*")
+    .eq("id", contractId)
+    .single();
+  if (error || !row) throw new Error("Contract not found");
+
+  const months = Number(row.renewal_months) || Number(row.months) || 12;
+  const periodStart = row.end_date as string;
+  const periodEnd = addMonths(periodStart, months);
+  const discount =
+    row.discount_scope === "every_period" ? Number(row.discount_value) || 0 : 0;
+  const amount = periodAmount(
+    Number(row.monthly_rent) || 0,
+    months,
+    discount,
+    (row.discount_kind as "fixed" | "percent") ?? "fixed",
+  );
+
+  const invoice: Invoice = {
+    id: uid(),
+    contractId,
+    periodStart,
+    periodEnd,
+    amount,
+    status: "issued",
+    issuedAt: new Date().toISOString(),
+  };
+  const { error: iErr } = await supabase
+    .from("invoices")
+    .insert(invoiceToRow(invoice));
+  if (iErr) throw new Error(iErr.message);
+
+  const { error: cErr } = await supabase
+    .from("contracts")
+    .update({
+      end_date: periodEnd,
+      status: "renewal_await_payment",
+      renewal_count: (Number(row.renewal_count) || 0) + 1,
+    })
+    .eq("id", contractId);
+  if (cErr) throw new Error(cErr.message);
+}
+
+/** Close a contract → frees the office. Creator staff or an admin only. */
+export async function closeContractAction(contractId: string): Promise<void> {
+  const session = await requireSession();
+  const supabase = createAdminClient();
+
+  const { data: row, error } = await supabase
+    .from("contracts")
+    .select("created_by_staff_id")
+    .eq("id", contractId)
+    .single();
+  if (error || !row) throw new Error("Contract not found");
+
+  const isAdmin = session.user.role === "admin";
+  const isCreator = row.created_by_staff_id === session.user.id;
+  if (!isAdmin && !isCreator) {
+    throw new Error("Only the staff who created this contract, or an admin, can close it");
+  }
+
+  const { error: cErr } = await supabase
+    .from("contracts")
+    .update({ status: "closed" })
+    .eq("id", contractId);
+  if (cErr) throw new Error(cErr.message);
+}
+
 /**
  * Marks an invoice paid — REQUIRES a receipt PDF (<=1MB). Uploads the receipt
  * to the private `receipts` bucket, records it, and activates the contract if

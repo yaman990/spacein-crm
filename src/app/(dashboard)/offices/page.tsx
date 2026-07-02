@@ -100,6 +100,8 @@ export default function OfficesPage() {
     saveBuilding,
     markInvoicePaid,
     getReceiptUrl,
+    renewContract,
+    closeContract,
   } = useOffices();
   const floorKeys = useMemo(() => Object.keys(floors), [floors]);
   const [activeFloor, setActiveFloor] = useState(floorKeys[0] ?? "");
@@ -638,6 +640,8 @@ export default function OfficesPage() {
         }
         onMarkPaid={markInvoicePaid}
         getReceiptUrl={getReceiptUrl}
+        onRenew={renewContract}
+        onClose={closeContract}
         onAddContract={() => {
           if (detailOfficeNo) {
             setNewContractTarget({ floorKey: activeFloor, officeNo: detailOfficeNo });
