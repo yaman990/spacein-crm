@@ -23,6 +23,8 @@ import {
 } from "@/actions/crm";
 import {
   createContractAction,
+  getReceiptUrlAction,
+  markInvoicePaidAction,
   saveBuildingAction,
   saveOfficeDetailsAction,
   type CreateContractInput,
@@ -81,6 +83,8 @@ interface CrmContextValue extends CrmSnapshot {
   createContract: (input: CreateContractInput) => Promise<Contract>;
   saveOfficeDetails: (details: OfficeDetails) => Promise<void>;
   saveBuilding: (building: Omit<Building, "id"> & { id?: string }) => Promise<void>;
+  markInvoicePaid: (invoiceId: string, receipt: File) => Promise<void>;
+  getReceiptUrl: (invoiceId: string) => Promise<string | null>;
 }
 
 const CrmContext = createContext<CrmContextValue | null>(null);
@@ -238,6 +242,22 @@ export function CrmProvider({
     [refresh],
   );
 
+  const markInvoicePaid = useCallback(
+    async (invoiceId: string, receipt: File) => {
+      const fd = new FormData();
+      fd.set("invoiceId", invoiceId);
+      fd.set("receipt", receipt);
+      await markInvoicePaidAction(fd);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const getReceiptUrl = useCallback(
+    (invoiceId: string) => getReceiptUrlAction(invoiceId),
+    [],
+  );
+
   const value = useMemo<CrmContextValue>(
     () => ({
       clients,
@@ -264,6 +284,8 @@ export function CrmProvider({
       createContract,
       saveOfficeDetails,
       saveBuilding,
+      markInvoicePaid,
+      getReceiptUrl,
     }),
     [
       clients,
@@ -289,6 +311,8 @@ export function CrmProvider({
       createContract,
       saveOfficeDetails,
       saveBuilding,
+      markInvoicePaid,
+      getReceiptUrl,
     ],
   );
 
@@ -345,6 +369,8 @@ export function useOffices() {
     createContract,
     saveOfficeDetails,
     saveBuilding,
+    markInvoicePaid,
+    getReceiptUrl,
   } = useCrm();
   return {
     clients,
@@ -363,6 +389,8 @@ export function useOffices() {
     createContract,
     saveOfficeDetails,
     saveBuilding,
+    markInvoicePaid,
+    getReceiptUrl,
   };
 }
 

@@ -126,6 +126,66 @@ export async function createContractAction(
   return contract;
 }
 
+/**
+ * Marks an invoice paid — REQUIRES a receipt PDF (<=1MB). Uploads the receipt
+ * to the private `receipts` bucket, records it, and activates the contract if
+ * it was awaiting payment (reserved / renewal).
+ */
+export async function markInvoicePaidAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const supabase = createAdminClient();
+
+  const invoiceId = String(formData.get("invoiceId") || "");
+  const file = formData.get("receipt");
+  if (!invoiceId) throw new Error("Missing invoice");
+  if (!(file instanceof File) || file.size === 0)
+    throw new Error("A receipt PDF is required to mark this paid");
+  if (file.type !== "application/pdf")
+    throw new Error("The receipt must be a PDF file");
+  if (file.size > 1024 * 1024)
+    throw new Error("The receipt must be 1 MB or less");
+
+  const path = `${invoiceId}.pdf`;
+  const { error: upErr } = await supabase.storage
+    .from("receipts")
+    .upload(path, file, { upsert: true, contentType: "application/pdf" });
+  if (upErr) throw new Error(upErr.message);
+
+  const { data: inv, error: iErr } = await supabase
+    .from("invoices")
+    .update({
+      status: "paid",
+      paid_at: new Date().toISOString(),
+      paid_by_staff_id: session.user.id,
+      receipt_path: path,
+    })
+    .eq("id", invoiceId)
+    .select("contract_id")
+    .single();
+  if (iErr) throw new Error(iErr.message);
+
+  if (inv?.contract_id) {
+    await supabase
+      .from("contracts")
+      .update({ status: "active" })
+      .eq("id", inv.contract_id)
+      .in("status", ["reserved", "renewal_await_payment"]);
+  }
+}
+
+/** Short-lived signed URL to view/download a receipt. */
+export async function getReceiptUrlAction(
+  invoiceId: string,
+): Promise<string | null> {
+  await requireSession();
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.storage
+    .from("receipts")
+    .createSignedUrl(`${invoiceId}.pdf`, 120);
+  if (error) return null;
+  return data?.signedUrl ?? null;
+}
+
 export async function saveOfficeDetailsAction(
   details: OfficeDetails,
 ): Promise<void> {

@@ -27,6 +27,7 @@ import {
   type OfficeInfo,
 } from "@/components/offices/office-floor-map";
 import { NewContractDialog } from "@/components/contracts/new-contract-dialog";
+import { ContractDetailDialog } from "@/components/contracts/contract-detail-dialog";
 import { OfficeSetupDialog } from "@/components/offices/office-setup-dialog";
 import { FLOOR5_LAYOUT } from "@/data/floor5-layout";
 import { FloorManagerDialog } from "@/components/offices/floor-manager-dialog";
@@ -97,14 +98,16 @@ export default function OfficesPage() {
     createContract,
     saveOfficeDetails,
     saveBuilding,
+    markInvoicePaid,
+    getReceiptUrl,
   } = useOffices();
-  void invoices;
   const floorKeys = useMemo(() => Object.keys(floors), [floors]);
   const [activeFloor, setActiveFloor] = useState(floorKeys[0] ?? "");
   const [newContractTarget, setNewContractTarget] = useState<{
     floorKey: string;
     officeNo: string;
   } | null>(null);
+  const [detailOfficeNo, setDetailOfficeNo] = useState<string | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<{
     floorKey: string;
@@ -308,14 +311,16 @@ export default function OfficesPage() {
     });
   }
 
-  /** Click an office: open a new contract if there's a free slot, else edit. */
+  /**
+   * Click an office: restricted → edit; empty → new contract; occupied → the
+   * contract detail (mark paid, view receipt, add tenant if a slot is free).
+   */
   function selectOffice(officeNo: string) {
     const occ = occupancyByNo.get(officeNo);
-    if (occ && occ.hasFreeSlot && occ.status !== "restricted") {
-      setNewContractTarget({ floorKey: activeFloor, officeNo });
-    } else {
-      openEdit(activeFloor, officeNo);
-    }
+    if (!occ) return;
+    if (occ.status === "restricted") openEdit(activeFloor, officeNo);
+    else if (occ.used === 0) setNewContractTarget({ floorKey: activeFloor, officeNo });
+    else setDetailOfficeNo(officeNo);
   }
 
   async function handleSaveEdit(input: {
@@ -619,6 +624,27 @@ export default function OfficesPage() {
           }}
         />
       )}
+
+      <ContractDetailDialog
+        open={!!detailOfficeNo}
+        onOpenChange={(open) => !open && setDetailOfficeNo(null)}
+        occupancy={detailOfficeNo ? occupancyByNo.get(detailOfficeNo) ?? null : null}
+        invoices={invoices}
+        clients={clients}
+        hasFreeSlot={
+          detailOfficeNo
+            ? (occupancyByNo.get(detailOfficeNo)?.hasFreeSlot ?? false)
+            : false
+        }
+        onMarkPaid={markInvoicePaid}
+        getReceiptUrl={getReceiptUrl}
+        onAddContract={() => {
+          if (detailOfficeNo) {
+            setNewContractTarget({ floorKey: activeFloor, officeNo: detailOfficeNo });
+            setDetailOfficeNo(null);
+          }
+        }}
+      />
 
       <OfficeSetupDialog
         open={setupOpen}

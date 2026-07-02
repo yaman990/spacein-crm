@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // receipt PDFs (<=1MB) are sent to a server action as FormData
+    serverActions: { bodySizeLimit: "2mb" },
+  },
 };
 
 export default nextConfig;
