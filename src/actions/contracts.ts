@@ -8,7 +8,10 @@ import {
   contractToRow,
   invoiceToRow,
   officeDetailsToRow,
+  rowToContract,
 } from "@/lib/supabase/mappers";
+import { sendEmailViaResend } from "@/lib/email/resend";
+import { categorizeContracts, daysUntil } from "@/lib/contract-checks";
 import type {
   Building,
   Contract,
@@ -258,6 +261,155 @@ export async function getReceiptUrlAction(
     .createSignedUrl(`${invoiceId}.pdf`, 120);
   if (error) return null;
   return data?.signedUrl ?? null;
+}
+
+export interface ChecksSummary {
+  renewed: number;
+  expired: number;
+  reminded: number;
+  emailsSent: number;
+  emailErrors: number;
+  details: string[];
+}
+
+/**
+ * Admin action: process contracts whose term has ended (auto-renew or mark
+ * expired) and email 30-day expiry reminders to clients + the owning staff.
+ * "Already reminded" is tracked in crm_settings keyed by contract+end date, so
+ * renewals (new end date) naturally re-trigger. No cron required — run on demand.
+ */
+export async function runContractChecksAction(): Promise<ChecksSummary> {
+  const session = await requireSession();
+  if (session.user.role !== "admin") throw new Error("Admin only");
+  const supabase = createAdminClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date().toISOString();
+
+  const [cRes, clRes, stRes, setRes] = await Promise.all([
+    supabase.from("contracts").select("*"),
+    supabase.from("clients").select("id, name, company, email"),
+    supabase.from("crm_users").select("id, name, email"),
+    supabase
+      .from("crm_settings")
+      .select("key, value")
+      .eq("key", "contract_reminders"),
+  ]);
+
+  const contracts = (cRes.data ?? []).map(rowToContract);
+  const clientById = new Map(
+    (clRes.data ?? []).map((c) => [c.id as string, c]),
+  );
+  const staffById = new Map((stRes.data ?? []).map((s) => [s.id as string, s]));
+  const reminders = (setRes.data?.[0]?.value ?? {}) as Record<string, string>;
+
+  const { expiringSoon, dueRenewal, dueExpiry } = categorizeContracts(
+    contracts,
+    today,
+  );
+  const summary: ChecksSummary = {
+    renewed: 0,
+    expired: 0,
+    reminded: 0,
+    emailsSent: 0,
+    emailErrors: 0,
+    details: [],
+  };
+
+  const send = async (to: string | undefined, subject: string, body: string) => {
+    if (!to || !to.trim()) return;
+    try {
+      await sendEmailViaResend({ to, subject, body });
+      summary.emailsSent++;
+    } catch {
+      summary.emailErrors++;
+    }
+  };
+  const nameOf = (id: string) => {
+    const c = clientById.get(id);
+    return c?.company || c?.name || "client";
+  };
+
+  for (const c of dueRenewal) {
+    const months = c.renewalMonths || c.months || 12;
+    const periodStart = c.endDate;
+    const periodEnd = addMonths(periodStart, months);
+    const discount = c.discountScope === "every_period" ? c.discountValue : 0;
+    const amount = periodAmount(c.monthlyRent, months, discount, c.discountKind);
+    await supabase.from("invoices").insert(
+      invoiceToRow({
+        id: uid(),
+        contractId: c.id,
+        periodStart,
+        periodEnd,
+        amount,
+        status: "issued",
+        issuedAt: now,
+      }),
+    );
+    await supabase
+      .from("contracts")
+      .update({
+        end_date: periodEnd,
+        status: "renewal_await_payment",
+        renewal_count: c.renewalCount + 1,
+      })
+      .eq("id", c.id);
+    delete reminders[c.id];
+    summary.renewed++;
+    const cl = clientById.get(c.clientId);
+    const st = c.createdByStaffId ? staffById.get(c.createdByStaffId) : undefined;
+    await send(
+      cl?.email,
+      `Contract ${c.contractNo} renewed — payment required`,
+      `Dear ${nameOf(c.clientId)},\n\nYour office contract ${c.contractNo} (Office ${c.officeNo}) has been renewed for ${months} month(s): ${periodStart} to ${periodEnd}.\n\nInvoice amount: ${amount.toFixed(3)} BHD. Please complete payment and send the transfer receipt so we can activate the renewal.\n\nSpace IN Business Center`,
+    );
+    await send(
+      st?.email,
+      `Contract ${c.contractNo} auto-renewed (awaiting payment)`,
+      `Contract ${c.contractNo} for ${nameOf(c.clientId)} (Office ${c.officeNo}) auto-renewed: ${periodStart} to ${periodEnd}, ${amount.toFixed(3)} BHD. Awaiting receipt/payment.`,
+    );
+    summary.details.push(`Renewed ${c.contractNo} (Office ${c.officeNo})`);
+  }
+
+  for (const c of dueExpiry) {
+    await supabase.from("contracts").update({ status: "expired" }).eq("id", c.id);
+    summary.expired++;
+    const st = c.createdByStaffId ? staffById.get(c.createdByStaffId) : undefined;
+    await send(
+      st?.email,
+      `Contract ${c.contractNo} expired — action needed`,
+      `Contract ${c.contractNo} for ${nameOf(c.clientId)} (Office ${c.officeNo}) expired on ${c.endDate}. Please close it to free the office if it will not be renewed.`,
+    );
+    summary.details.push(`Expired ${c.contractNo} (Office ${c.officeNo})`);
+  }
+
+  for (const c of expiringSoon) {
+    if (reminders[c.id] === c.endDate) continue;
+    const days = daysUntil(c.endDate, today);
+    const cl = clientById.get(c.clientId);
+    const st = c.createdByStaffId ? staffById.get(c.createdByStaffId) : undefined;
+    await send(
+      cl?.email,
+      `Your contract ${c.contractNo} expires in ${days} day(s)`,
+      `Dear ${nameOf(c.clientId)},\n\nYour office contract ${c.contractNo} (Office ${c.officeNo}) expires on ${c.endDate} — in ${days} day(s). Please contact us to arrange the renewal.\n\nSpace IN Business Center`,
+    );
+    await send(
+      st?.email,
+      `Contract ${c.contractNo} expiring in ${days} day(s)`,
+      `Reminder: contract ${c.contractNo} for ${nameOf(c.clientId)} (Office ${c.officeNo}) expires on ${c.endDate} (${days} days).`,
+    );
+    reminders[c.id] = c.endDate;
+    summary.reminded++;
+    summary.details.push(
+      `Reminded ${c.contractNo} (${days}d, Office ${c.officeNo})`,
+    );
+  }
+
+  await supabase
+    .from("crm_settings")
+    .upsert({ key: "contract_reminders", value: reminders }, { onConflict: "key" });
+
+  return summary;
 }
 
 export async function saveOfficeDetailsAction(

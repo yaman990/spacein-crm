@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { useOffices } from "@/providers/crm-provider";
 import {
@@ -102,7 +103,28 @@ export default function OfficesPage() {
     getReceiptUrl,
     renewContract,
     closeContract,
+    runContractChecks,
   } = useOffices();
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "admin";
+  const [runningChecks, setRunningChecks] = useState(false);
+
+  async function handleRunChecks() {
+    setRunningChecks(true);
+    try {
+      const s = await runContractChecks();
+      toast.success(
+        `Checks done — renewed ${s.renewed}, expired ${s.expired}, reminded ${s.reminded}` +
+          (s.emailsSent ? `, ${s.emailsSent} emails sent` : "") +
+          (s.emailErrors ? `, ${s.emailErrors} email errors` : ""),
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Run failed");
+    } finally {
+      setRunningChecks(false);
+    }
+  }
+
   const floorKeys = useMemo(() => Object.keys(floors), [floors]);
   const [activeFloor, setActiveFloor] = useState(floorKeys[0] ?? "");
   const [newContractTarget, setNewContractTarget] = useState<{
@@ -361,6 +383,16 @@ export default function OfficesPage() {
               <TabsTrigger value="table">Table</TabsTrigger>
             </TabsList>
           </Tabs>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              disabled={runningChecks}
+              onClick={handleRunChecks}
+              title="Auto-renew/expire ended contracts and email 30-day expiry reminders"
+            >
+              {runningChecks ? "Running…" : "Run renewals & reminders"}
+            </Button>
+          )}
           <Button variant="outline" onClick={() => setSetupOpen(true)}>
             Building & Rates
           </Button>

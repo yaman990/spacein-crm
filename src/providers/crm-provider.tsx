@@ -27,8 +27,10 @@ import {
   getReceiptUrlAction,
   markInvoicePaidAction,
   renewContractAction,
+  runContractChecksAction,
   saveBuildingAction,
   saveOfficeDetailsAction,
+  type ChecksSummary,
   type CreateContractInput,
 } from "@/actions/contracts";
 import { addMonths } from "@/lib/format";
@@ -89,6 +91,7 @@ interface CrmContextValue extends CrmSnapshot {
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   renewContract: (contractId: string) => Promise<void>;
   closeContract: (contractId: string) => Promise<void>;
+  runContractChecks: () => Promise<ChecksSummary>;
 }
 
 const CrmContext = createContext<CrmContextValue | null>(null);
@@ -278,6 +281,12 @@ export function CrmProvider({
     [refresh],
   );
 
+  const runContractChecks = useCallback(async () => {
+    const s = await runContractChecksAction();
+    await refresh();
+    return s;
+  }, [refresh]);
+
   const value = useMemo<CrmContextValue>(
     () => ({
       clients,
@@ -308,6 +317,7 @@ export function CrmProvider({
       getReceiptUrl,
       renewContract,
       closeContract,
+      runContractChecks,
     }),
     [
       clients,
@@ -337,6 +347,7 @@ export function CrmProvider({
       getReceiptUrl,
       renewContract,
       closeContract,
+      runContractChecks,
     ],
   );
 
@@ -397,6 +408,7 @@ export function useOffices() {
     getReceiptUrl,
     renewContract,
     closeContract,
+    runContractChecks,
   } = useCrm();
   return {
     clients,
@@ -419,6 +431,7 @@ export function useOffices() {
     getReceiptUrl,
     renewContract,
     closeContract,
+    runContractChecks,
   };
 }
 
