@@ -12,13 +12,59 @@ import {
   mapToOverrideRows,
   overridesToMap,
   rowToActivity,
+  rowToBuilding,
   rowToClient,
+  rowToContract,
+  rowToInvoice,
+  rowToOfficeDetails,
   rowsToFloors,
 } from "@/lib/supabase/mappers";
 import type { ActivityType } from "@/types/activity";
 import type { Client, ClientInput, ClientStatus } from "@/types/client";
 import type { FloorsMap, OfficeOverrides } from "@/types/office";
+import type {
+  Building,
+  Contract,
+  Invoice,
+  OfficeDetails,
+} from "@/types/contract";
 import defaultFloors from "@/data/default-floors.json";
+
+/**
+ * Reads the contract-workflow tables. Resilient by design: if the tables don't
+ * exist yet (before the Phase 1 migration is applied), it returns empties
+ * instead of throwing, so the rest of the dashboard keeps working.
+ */
+async function fetchContractsResilient(): Promise<{
+  contracts: Contract[];
+  invoices: Invoice[];
+  officeDetails: OfficeDetails[];
+  building: Building | null;
+}> {
+  const supabase = createAdminClient();
+  const [contractsRes, invoicesRes, detailsRes, buildingRes] =
+    await Promise.all([
+      supabase.from("contracts").select("*"),
+      supabase.from("invoices").select("*"),
+      supabase.from("office_details").select("*"),
+      supabase.from("buildings").select("*").limit(1),
+    ]);
+  return {
+    contracts: contractsRes.error
+      ? []
+      : (contractsRes.data ?? []).map(rowToContract),
+    invoices: invoicesRes.error
+      ? []
+      : (invoicesRes.data ?? []).map(rowToInvoice),
+    officeDetails: detailsRes.error
+      ? []
+      : (detailsRes.data ?? []).map(rowToOfficeDetails),
+    building:
+      buildingRes.error || !buildingRes.data?.length
+        ? null
+        : rowToBuilding(buildingRes.data[0]),
+  };
+}
 
 async function requireSession() {
   const session = await auth();
@@ -51,20 +97,29 @@ export async function fetchCrmData(): Promise<{
   activityLog: import("@/types/activity").ActivityLogEntry[];
   officeOverrides: OfficeOverrides;
   floors: FloorsMap;
+  contracts: Contract[];
+  invoices: Invoice[];
+  officeDetails: OfficeDetails[];
+  building: Building | null;
 }> {
   await requireSession();
   const supabase = createAdminClient();
 
-  const [clientsRes, logRes, overridesRes, settingsRes] = await Promise.all([
-    supabase.from("clients").select("*").order("due_date", { ascending: true }),
-    supabase
-      .from("activity_log")
-      .select("*")
-      .order("ts", { ascending: false })
-      .limit(500),
-    supabase.from("office_overrides").select("key, value"),
-    supabase.from("crm_settings").select("key, value"),
-  ]);
+  const [clientsRes, logRes, overridesRes, settingsRes, contractsData] =
+    await Promise.all([
+      supabase
+        .from("clients")
+        .select("*")
+        .order("due_date", { ascending: true }),
+      supabase
+        .from("activity_log")
+        .select("*")
+        .order("ts", { ascending: false })
+        .limit(500),
+      supabase.from("office_overrides").select("key, value"),
+      supabase.from("crm_settings").select("key, value"),
+      fetchContractsResilient(),
+    ]);
 
   if (clientsRes.error) throw new Error(clientsRes.error.message);
   if (logRes.error) throw new Error(logRes.error.message);
@@ -82,6 +137,7 @@ export async function fetchCrmData(): Promise<{
       })),
       defaultFloors as FloorsMap,
     ),
+    ...contractsData,
   };
 }
 

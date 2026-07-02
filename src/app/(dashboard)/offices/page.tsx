@@ -1,16 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useOffices } from "@/providers/crm-provider";
 import {
-  globalOfficeStats,
-  resolveOfficeCompany,
   resolveOfficeStatus,
   officeCategoryFromTitle,
   OFFICE_CATEGORY_LABELS,
   type OfficeCategory,
 } from "@/lib/office-stats";
+import {
+  deriveOccupancy,
+  officeDetailsMap,
+  type DerivedOfficeStatus,
+  type OfficeOccupancy,
+} from "@/lib/office-contracts";
 import { sortOfficeRows, type OfficeSortKey } from "@/lib/table-sort";
 import { useTableSort } from "@/hooks/use-table-sort";
 import type { Client } from "@/types/client";
@@ -22,6 +26,8 @@ import {
   OfficeFloorMap,
   type OfficeInfo,
 } from "@/components/offices/office-floor-map";
+import { NewContractDialog } from "@/components/contracts/new-contract-dialog";
+import { OfficeSetupDialog } from "@/components/offices/office-setup-dialog";
 import { FLOOR5_LAYOUT } from "@/data/floor5-layout";
 import { FloorManagerDialog } from "@/components/offices/floor-manager-dialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -69,13 +75,37 @@ type ResolvedOfficeRow = {
   no: string;
   status: OfficeStatus;
   company: string;
-  linkedClient?: Client;
 };
 
+/** Map the richer contract-derived status onto the 3-state used by the table. */
+function simplifyStatus(s: DerivedOfficeStatus): OfficeStatus {
+  if (s === "restricted") return "restricted";
+  if (s === "available") return "unrented";
+  return "rented";
+}
+
 export default function OfficesPage() {
-  const { clients, floors, officeOverrides, saveOfficeEdit } = useOffices();
+  const {
+    clients,
+    floors,
+    officeOverrides,
+    contracts,
+    invoices,
+    officeDetails,
+    building,
+    saveOfficeEdit,
+    createContract,
+    saveOfficeDetails,
+    saveBuilding,
+  } = useOffices();
+  void invoices;
   const floorKeys = useMemo(() => Object.keys(floors), [floors]);
   const [activeFloor, setActiveFloor] = useState(floorKeys[0] ?? "");
+  const [newContractTarget, setNewContractTarget] = useState<{
+    floorKey: string;
+    officeNo: string;
+  } | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<{
     floorKey: string;
     officeNo: string;
@@ -95,12 +125,85 @@ export default function OfficesPage() {
     "asc",
   );
 
-  const stats = useMemo(
-    () => globalOfficeStats(floors, officeOverrides),
-    [floors, officeOverrides],
+  const currentFloor = floors[activeFloor];
+
+  const clientById = useMemo(() => {
+    const m = new Map<string, Client>();
+    clients.forEach((c) => m.set(c.id, c));
+    return m;
+  }, [clients]);
+
+  const detailsByKey = useMemo(
+    () => officeDetailsMap(officeDetails),
+    [officeDetails],
   );
 
-  const currentFloor = floors[activeFloor];
+  const occupantLabel = useCallback(
+    (occ: OfficeOccupancy): string =>
+      occ.contracts
+        .map((c) => {
+          const cl = clientById.get(c.clientId);
+          return cl?.company || cl?.name || "";
+        })
+        .filter(Boolean)
+        .join(", "),
+    [clientById],
+  );
+
+  // occupancy for every office on the active floor (contract-derived)
+  const occupancyByNo = useMemo(() => {
+    const m = new Map<string, OfficeOccupancy>();
+    if (!currentFloor) return m;
+    currentFloor.sections.forEach((sec) =>
+      sec.offices.forEach((o) => {
+        if (!o.no || o.no === "—") return;
+        const restricted =
+          resolveOfficeStatus(activeFloor, o.no, o.st, officeOverrides) ===
+          "restricted";
+        m.set(
+          o.no,
+          deriveOccupancy(activeFloor, o.no, contracts, detailsByKey, restricted),
+        );
+      }),
+    );
+    return m;
+  }, [currentFloor, activeFloor, contracts, detailsByKey, officeOverrides]);
+
+  // global stats across all floors (contract-derived)
+  const stats = useMemo(() => {
+    let total = 0;
+    let rented = 0;
+    let restricted = 0;
+    let free = 0;
+    Object.entries(floors).forEach(([fk, floor]) =>
+      floor.sections.forEach((sec) =>
+        sec.offices.forEach((o) => {
+          if (!o.no || o.no === "—") return;
+          total++;
+          const isRestricted =
+            resolveOfficeStatus(fk, o.no, o.st, officeOverrides) ===
+            "restricted";
+          const occ = deriveOccupancy(
+            fk,
+            o.no,
+            contracts,
+            detailsByKey,
+            isRestricted,
+          );
+          if (occ.status === "restricted") restricted++;
+          else if (occ.used > 0) rented++;
+          else free++;
+        }),
+      ),
+    );
+    return {
+      total,
+      rented,
+      free,
+      restricted,
+      rate: total ? Math.round((rented / total) * 100) : 0,
+    };
+  }, [floors, contracts, detailsByKey, officeOverrides]);
 
   const sectionsWithOffices = useMemo(() => {
     if (!currentFloor) return [];
@@ -115,25 +218,14 @@ export default function OfficesPage() {
       )
       .map(({ sec, sIdx }) => {
       let rows: ResolvedOfficeRow[] = sec.offices.map((o, oIdx) => {
-        const st = resolveOfficeStatus(
-          activeFloor,
-          o.no,
-          o.st,
-          officeOverrides,
-        );
-        const { company, linkedClient } = resolveOfficeCompany(
-          activeFloor,
-          o.no,
-          o.co,
-          officeOverrides,
-          clients,
-        );
+        const occ = occupancyByNo.get(o.no);
+        const status = occ ? simplifyStatus(occ.status) : "unrented";
+        const company = occ ? occupantLabel(occ) : "";
         return {
           key: `${activeFloor}-${sIdx}-${oIdx}`,
           no: o.no,
-          status: st,
+          status,
           company,
-          linkedClient: linkedClient ?? undefined,
         };
       });
 
@@ -145,8 +237,7 @@ export default function OfficesPage() {
         rows = rows.filter(
           (r) =>
             r.no.toLowerCase().includes(q) ||
-            r.company.toLowerCase().includes(q) ||
-            r.linkedClient?.name.toLowerCase().includes(q),
+            r.company.toLowerCase().includes(q),
         );
       }
 
@@ -155,9 +246,9 @@ export default function OfficesPage() {
     });
   }, [
     activeFloor,
-    clients,
     currentFloor,
-    officeOverrides,
+    occupancyByNo,
+    occupantLabel,
     search,
     sortKey,
     direction,
@@ -167,35 +258,20 @@ export default function OfficesPage() {
 
   const hasFloorPlan = activeFloor === "floor5";
 
-  // Full, unfiltered status/company for every office on the floor — used to
-  // position and colour the CAD floor map.
+  // Contract-derived status + occupant for every office on the floor — used to
+  // colour the CAD floor map.
   const officeInfo = useMemo(() => {
     const map = new Map<string, OfficeInfo>();
-    if (!currentFloor) return map;
-    currentFloor.sections.forEach((sec) =>
-      sec.offices.forEach((o) => {
-        const status = resolveOfficeStatus(
-          activeFloor,
-          o.no,
-          o.st,
-          officeOverrides,
-        );
-        const { company, linkedClient } = resolveOfficeCompany(
-          activeFloor,
-          o.no,
-          o.co,
-          officeOverrides,
-          clients,
-        );
-        map.set(o.no, {
-          status,
-          company,
-          linkedClient: linkedClient ?? undefined,
-        });
-      }),
-    );
+    occupancyByNo.forEach((occ, no) => {
+      map.set(no, {
+        status: occ.status,
+        label: occupantLabel(occ),
+        used: occ.used,
+        capacity: occ.capacity,
+      });
+    });
     return map;
-  }, [activeFloor, currentFloor, officeOverrides, clients]);
+  }, [occupancyByNo, occupantLabel]);
 
   // Office numbers passing the active filters — highlighted on the map.
   const matchedNos = useMemo(() => {
@@ -218,26 +294,28 @@ export default function OfficesPage() {
         if (o.no === officeNo) defaultStatus = o.st;
       }),
     );
-    const status = resolveOfficeStatus(
-      floorKey,
-      officeNo,
-      defaultStatus,
-      officeOverrides,
-    );
-    const { company, linkedClient } = resolveOfficeCompany(
-      floorKey,
-      officeNo,
-      "",
-      officeOverrides,
-      clients,
-    );
+    const occ = occupancyByNo.get(officeNo);
+    const status = occ
+      ? simplifyStatus(occ.status)
+      : resolveOfficeStatus(floorKey, officeNo, defaultStatus, officeOverrides);
+    const company = occ ? occupantLabel(occ) : "";
     setEditTarget({
       floorKey,
       officeNo,
       status,
       company,
-      linkedClientName: linkedClient?.name,
+      linkedClientName: company || undefined,
     });
+  }
+
+  /** Click an office: open a new contract if there's a free slot, else edit. */
+  function selectOffice(officeNo: string) {
+    const occ = occupancyByNo.get(officeNo);
+    if (occ && occ.hasFreeSlot && occ.status !== "restricted") {
+      setNewContractTarget({ floorKey: activeFloor, officeNo });
+    } else {
+      openEdit(activeFloor, officeNo);
+    }
   }
 
   async function handleSaveEdit(input: {
@@ -276,6 +354,9 @@ export default function OfficesPage() {
               <TabsTrigger value="table">Table</TabsTrigger>
             </TabsList>
           </Tabs>
+          <Button variant="outline" onClick={() => setSetupOpen(true)}>
+            Building & Rates
+          </Button>
           <Button onClick={() => setFloorMgrOpen(true)}>
             Manage Floors & Sections
           </Button>
@@ -401,7 +482,7 @@ export default function OfficesPage() {
                     ? editTarget.officeNo
                     : undefined
                 }
-                onSelect={(officeNo) => openEdit(activeFloor, officeNo)}
+                onSelect={selectOffice}
               />
             ) : (
               <OfficeFloorPlan
@@ -411,7 +492,7 @@ export default function OfficesPage() {
                     ? editTarget.officeNo
                     : undefined
                 }
-                onSelect={(officeNo) => openEdit(activeFloor, officeNo)}
+                onSelect={selectOffice}
               />
             )}
           </CardContent>
@@ -488,14 +569,6 @@ export default function OfficesPage() {
                                 — empty —
                               </span>
                             )}
-                            {row.linkedClient && (
-                              <Badge
-                                variant="secondary"
-                                className="ml-2 text-[0.6rem] text-muted-foreground"
-                              >
-                                linked
-                              </Badge>
-                            )}
                           </TableCell>
                         </TableRow>
                       );
@@ -522,6 +595,39 @@ export default function OfficesPage() {
       <FloorManagerDialog
         open={floorMgrOpen}
         onOpenChange={setFloorMgrOpen}
+      />
+
+      {newContractTarget && (
+        <NewContractDialog
+          open={!!newContractTarget}
+          onOpenChange={(open) => !open && setNewContractTarget(null)}
+          floorKey={newContractTarget.floorKey}
+          officeNo={newContractTarget.officeNo}
+          details={detailsByKey.get(
+            `${newContractTarget.floorKey}_${newContractTarget.officeNo}`,
+          )}
+          building={building}
+          clients={clients}
+          onCreate={async (input) => {
+            try {
+              await createContract(input);
+              toast.success(`Contract created for office ${input.officeNo}`);
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Create failed");
+              throw err;
+            }
+          }}
+        />
+      )}
+
+      <OfficeSetupDialog
+        open={setupOpen}
+        onOpenChange={setSetupOpen}
+        floors={floors}
+        building={building}
+        officeDetails={officeDetails}
+        onSaveBuilding={saveBuilding}
+        onSaveOfficeDetails={saveOfficeDetails}
       />
     </div>
   );

@@ -1,10 +1,12 @@
 export type ClientStatus = "pending" | "sent" | "paid" | "overdue";
 export type InvoiceType = "subscription" | "rent";
+export type ClientType = "individual" | "commercial";
 
 export interface Client {
   id: string;
   name: string;
   company: string;
+  type?: ClientType;
   rank: string;
   office: string;
   phone: string;

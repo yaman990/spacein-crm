@@ -1,24 +1,44 @@
 "use client";
 
 import { Ban, Check } from "lucide-react";
-import type { Client } from "@/types/client";
-import type { OfficeStatus } from "@/types/office";
+import type { DerivedOfficeStatus } from "@/lib/office-contracts";
 import type { FloorLayout, LandmarkKind } from "@/data/floor5-layout";
 import { cn } from "@/lib/utils";
 
 export type OfficeInfo = {
-  status: OfficeStatus;
-  company: string;
-  linkedClient?: Client;
+  status: DerivedOfficeStatus;
+  label: string; // occupant / company, or ""
+  used?: number;
+  capacity?: number;
 };
 
-const seatStyles: Record<OfficeStatus, string> = {
-  unrented:
+const seatStyles: Record<DerivedOfficeStatus, string> = {
+  available:
     "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/30 hover:border-emerald-500 dark:text-emerald-300",
-  rented:
+  shared:
+    "border-teal-500/60 bg-teal-500/15 text-teal-700 hover:bg-teal-500/25 dark:text-teal-300",
+  reserved:
+    "border-amber-500/60 bg-amber-400/20 text-amber-700 hover:bg-amber-400/30 dark:text-amber-300",
+  active:
     "border-border bg-muted text-muted-foreground hover:bg-muted/70 hover:border-foreground/40",
+  full: "border-border bg-muted text-muted-foreground hover:bg-muted/70",
+  renewal:
+    "border-orange-500/60 bg-orange-400/20 text-orange-700 hover:bg-orange-400/30 dark:text-orange-300",
+  expired:
+    "border-destructive/60 bg-destructive/20 text-destructive hover:bg-destructive/30",
   restricted:
     "border-destructive/50 bg-destructive/15 text-destructive hover:bg-destructive/25",
+};
+
+const STATUS_TITLE: Record<DerivedOfficeStatus, string> = {
+  available: "Available (click to open a contract)",
+  shared: "Shared — free slot (click to add a contract)",
+  reserved: "Reserved — pending payment",
+  active: "Rented",
+  full: "Full",
+  renewal: "Renewal — awaiting payment",
+  expired: "Expired — awaiting close",
+  restricted: "Restricted",
 };
 
 const landmarkStyles: Record<LandmarkKind, string> = {
@@ -77,15 +97,13 @@ export function OfficeFloorMap({
         {/* offices */}
         {layout.offices.map((o) => {
           const info = officeInfo.get(o.no);
-          const status: OfficeStatus = info?.status ?? "unrented";
+          const status: DerivedOfficeStatus = info?.status ?? "available";
           const dimmed = filtersActive && !matchedNos.has(o.no);
           const selected = selectedNo === o.no;
-          const title =
-            status === "unrented"
-              ? `Office ${o.no} — Available (click to assign)`
-              : status === "restricted"
-                ? `Office ${o.no} — Restricted`
-                : `Office ${o.no} — ${info?.company || "Rented"}`;
+          const shared = (info?.capacity ?? 1) > 1;
+          const title = `Office ${o.no} — ${STATUS_TITLE[status]}${
+            info?.label ? ` · ${info.label}` : ""
+          }`;
 
           return (
             <button
@@ -109,6 +127,11 @@ export function OfficeFloorMap({
                   aria-hidden
                 />
               )}
+              {shared && (
+                <span className="absolute right-0.5 top-0.5 rounded bg-foreground/70 px-0.5 text-[0.5rem] font-bold leading-tight text-background">
+                  {info?.used ?? 0}/{info?.capacity}
+                </span>
+              )}
               {selected && (
                 <span className="absolute -left-1 -top-1 flex size-3.5 items-center justify-center rounded-full bg-foreground text-background">
                   <Check className="size-2" aria-hidden />
@@ -117,9 +140,9 @@ export function OfficeFloorMap({
               <span className="font-mono text-xs font-bold leading-none">
                 {o.no}
               </span>
-              {info?.company && status !== "unrented" && (
+              {info?.label && status !== "available" && (
                 <span className="line-clamp-2 w-full px-0.5 text-[0.5rem] leading-tight">
-                  {info.company}
+                  {info.label}
                 </span>
               )}
             </button>

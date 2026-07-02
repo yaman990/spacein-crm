@@ -16,6 +16,10 @@ const emptySnapshot: CrmSnapshot = {
   activityLog: [],
   officeOverrides: {},
   floors: defaultFloors as FloorsMap,
+  contracts: [],
+  invoices: [],
+  officeDetails: [],
+  building: null,
 };
 
 export default async function DashboardLayout({

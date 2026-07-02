@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
   company: z.string(),
+  type: z.enum(["individual", "commercial"]),
   phone: z.string(),
   email: z.string(),
   rank: z.string(),
@@ -55,6 +56,7 @@ type FormState = z.infer<typeof schema>;
 const emptyForm = (): FormState => ({
   name: "",
   company: "",
+  type: "commercial",
   phone: "",
   email: "",
   rank: "",
@@ -76,6 +78,7 @@ function clientToForm(client: Client): FormState {
   return {
     name: client.name,
     company: client.company,
+    type: client.type ?? "commercial",
     phone: client.phone,
     email: client.email,
     rank: client.rank,
@@ -185,6 +188,22 @@ export function ClientFormDialog({
               value={form.company}
               onChange={(e) => set("company", e.target.value)}
             />
+          </Field>
+          <Field label="Type">
+            <Select
+              value={form.type}
+              onValueChange={(v) =>
+                set("type", (v as FormState["type"]) ?? "commercial")
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="commercial">Commercial</SelectItem>
+                <SelectItem value="individual">Individual</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="Phone">
             <Input

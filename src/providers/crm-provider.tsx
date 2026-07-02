@@ -21,17 +21,38 @@ import {
   saveOfficeOverridesAction,
   updateClientAction,
 } from "@/actions/crm";
+import {
+  createContractAction,
+  saveBuildingAction,
+  saveOfficeDetailsAction,
+  type CreateContractInput,
+} from "@/actions/contracts";
 import { addMonths } from "@/lib/format";
 import { statusOf } from "@/lib/client-status";
 import type { ActivityLogEntry } from "@/types/activity";
-import type { Client, ClientInput, ClientStatus } from "@/types/client";
+import type {
+  Client,
+  ClientInput,
+  ClientStatus,
+  ClientType,
+} from "@/types/client";
 import type { FloorsMap, OfficeOverrides } from "@/types/office";
+import type {
+  Building,
+  Contract,
+  Invoice,
+  OfficeDetails,
+} from "@/types/contract";
 
 export interface CrmSnapshot {
   clients: Client[];
   activityLog: ActivityLogEntry[];
   officeOverrides: OfficeOverrides;
   floors: FloorsMap;
+  contracts: Contract[];
+  invoices: Invoice[];
+  officeDetails: OfficeDetails[];
+  building: Building | null;
 }
 
 interface CrmContextValue extends CrmSnapshot {
@@ -57,6 +78,9 @@ interface CrmContextValue extends CrmSnapshot {
     channel: "wa" | "email",
     messageType: string,
   ) => Promise<void>;
+  createContract: (input: CreateContractInput) => Promise<Contract>;
+  saveOfficeDetails: (details: OfficeDetails) => Promise<void>;
+  saveBuilding: (building: Omit<Building, "id"> & { id?: string }) => Promise<void>;
 }
 
 const CrmContext = createContext<CrmContextValue | null>(null);
@@ -74,6 +98,10 @@ export function CrmProvider({
     initialData.officeOverrides,
   );
   const [floors, setFloors] = useState(initialData.floors);
+  const [contracts, setContracts] = useState(initialData.contracts);
+  const [invoices, setInvoices] = useState(initialData.invoices);
+  const [officeDetails, setOfficeDetails] = useState(initialData.officeDetails);
+  const [building, setBuilding] = useState(initialData.building);
   const [isSyncing, setIsSyncing] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -84,6 +112,10 @@ export function CrmProvider({
       setActivityLog(data.activityLog);
       setOfficeOverrides(data.officeOverrides);
       setFloors(data.floors);
+      setContracts(data.contracts);
+      setInvoices(data.invoices);
+      setOfficeDetails(data.officeDetails);
+      setBuilding(data.building);
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to load CRM data",
@@ -181,12 +213,41 @@ export function CrmProvider({
     [refresh],
   );
 
+  const createContract = useCallback(
+    async (input: CreateContractInput): Promise<Contract> => {
+      const contract = await createContractAction(input);
+      await refresh();
+      return contract;
+    },
+    [refresh],
+  );
+
+  const saveOfficeDetails = useCallback(
+    async (details: OfficeDetails) => {
+      await saveOfficeDetailsAction(details);
+      await refresh();
+    },
+    [refresh],
+  );
+
+  const saveBuilding = useCallback(
+    async (b: Omit<Building, "id"> & { id?: string }) => {
+      await saveBuildingAction(b);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const value = useMemo<CrmContextValue>(
     () => ({
       clients,
       activityLog,
       officeOverrides,
       floors,
+      contracts,
+      invoices,
+      officeDetails,
+      building,
       isHydrated: true,
       isSyncing,
       refresh,
@@ -200,12 +261,19 @@ export function CrmProvider({
       saveOfficeEdit,
       recordDocument,
       recordCommunication,
+      createContract,
+      saveOfficeDetails,
+      saveBuilding,
     }),
     [
       clients,
       activityLog,
       officeOverrides,
       floors,
+      contracts,
+      invoices,
+      officeDetails,
+      building,
       isSyncing,
       refresh,
       addClient,
@@ -218,6 +286,9 @@ export function CrmProvider({
       saveOfficeEdit,
       recordDocument,
       recordCommunication,
+      createContract,
+      saveOfficeDetails,
+      saveBuilding,
     ],
   );
 
@@ -261,29 +332,49 @@ export function useOffices() {
     clients,
     floors,
     officeOverrides,
+    contracts,
+    invoices,
+    officeDetails,
+    building,
     isHydrated,
     isSyncing,
     setOfficeOverride,
     clearOfficeOverride,
     saveFloors,
     saveOfficeEdit,
+    createContract,
+    saveOfficeDetails,
+    saveBuilding,
   } = useCrm();
   return {
     clients,
     floors,
     officeOverrides,
+    contracts,
+    invoices,
+    officeDetails,
+    building,
     isHydrated,
     isSyncing,
     setOfficeOverride,
     clearOfficeOverride,
     saveFloors,
     saveOfficeEdit,
+    createContract,
+    saveOfficeDetails,
+    saveBuilding,
   };
+}
+
+export function useContracts() {
+  const { contracts, invoices, clients, isHydrated, isSyncing } = useCrm();
+  return { contracts, invoices, clients, isHydrated, isSyncing };
 }
 
 export function buildClientFromForm(values: {
   name: string;
   company: string;
+  type: ClientType;
   phone: string;
   email: string;
   rank: string;
@@ -317,6 +408,7 @@ export function buildClientFromForm(values: {
   return {
     name: values.name.trim(),
     company: values.company.trim(),
+    type: values.type,
     phone: values.phone.trim(),
     email: values.email.trim(),
     rank: values.rank.trim(),
