@@ -48,6 +48,8 @@ export function NewContractDialog({
   building,
   clients,
   onCreate,
+  legacyOccupant,
+  onMarkFree,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,6 +59,10 @@ export function NewContractDialog({
   building: Building | null;
   clients: Client[];
   onCreate: (input: CreateContractInput) => Promise<void>;
+  /** Tenant recorded in the legacy floor data (office has no contract yet). */
+  legacyOccupant?: string;
+  /** Clears the legacy occupancy and returns the office to Available. */
+  onMarkFree?: () => Promise<void>;
 }) {
   const [clientId, setClientId] = useState("");
   const [clientType, setClientType] = useState<ClientType>("commercial");
@@ -144,6 +150,27 @@ export function NewContractDialog({
           {addressLine}
           {details?.areaSqm ? ` · ${details.areaSqm} m²` : ""}
         </div>
+
+        {legacyOccupant !== undefined && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-amber-500/70 bg-amber-400/10 p-3 text-xs">
+            <span>
+              Recorded tenant (no contract yet):{" "}
+              <strong>{legacyOccupant || "unknown"}</strong> — create their
+              contract below, or mark the office free if they left.
+            </span>
+            {onMarkFree && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void onMarkFree().then(() => onOpenChange(false));
+                }}
+              >
+                Mark office free
+              </Button>
+            )}
+          </div>
+        )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-2">

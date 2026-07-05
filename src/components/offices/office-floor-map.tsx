@@ -26,6 +26,8 @@ const seatStyles: Record<DerivedOfficeStatus, string> = {
     "border-orange-500/60 bg-orange-400/20 text-orange-700 hover:bg-orange-400/30 dark:text-orange-300",
   expired:
     "border-destructive/60 bg-destructive/20 text-destructive hover:bg-destructive/30",
+  legacy:
+    "border-dashed border-amber-500/70 bg-muted text-muted-foreground hover:bg-muted/70",
   restricted:
     "border-destructive/50 bg-destructive/15 text-destructive hover:bg-destructive/25",
 };
@@ -38,6 +40,7 @@ const STATUS_TITLE: Record<DerivedOfficeStatus, string> = {
   full: "Full",
   renewal: "Renewal — awaiting payment",
   expired: "Expired — awaiting close",
+  legacy: "Occupied — no contract yet (click to create one)",
   restricted: "Restricted",
 };
 

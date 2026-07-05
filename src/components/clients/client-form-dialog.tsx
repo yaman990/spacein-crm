@@ -224,10 +224,11 @@ export function ClientFormDialog({
               onChange={(e) => set("rank", e.target.value)}
             />
           </Field>
-          <Field label="Office Number">
+          <Field label="Office No. (set automatically by contracts)">
             <Input
               value={form.office}
               onChange={(e) => set("office", e.target.value)}
+              placeholder="Assign via Offices → New contract"
             />
           </Field>
           <Field label="Join Date">

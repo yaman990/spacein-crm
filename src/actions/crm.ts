@@ -251,6 +251,30 @@ export async function markPaidAction(id: string): Promise<void> {
     .single();
   if (fetchErr || !existing) throw new Error("Client not found");
 
+  // Contract-managed clients must be paid through the contract flow, which
+  // requires uploading the transfer receipt — don't allow bypassing it here.
+  const { data: liveContracts } = await supabase
+    .from("contracts")
+    .select("id")
+    .eq("client_id", id)
+    .in("status", ["reserved", "active", "renewal_await_payment", "expired"]);
+  if (liveContracts && liveContracts.length > 0) {
+    const { data: openInvoices } = await supabase
+      .from("invoices")
+      .select("id")
+      .in(
+        "contract_id",
+        liveContracts.map((c) => c.id),
+      )
+      .eq("status", "issued")
+      .limit(1);
+    if (openInvoices && openInvoices.length > 0) {
+      throw new Error(
+        "This client has an open contract invoice — mark it paid from the Offices page (open the office, upload the transfer receipt).",
+      );
+    }
+  }
+
   const paidAt = new Date().toISOString();
   const { error } = await supabase
     .from("clients")

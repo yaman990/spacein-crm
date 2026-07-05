@@ -5,12 +5,14 @@ import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { useOffices } from "@/providers/crm-provider";
 import {
+  resolveOfficeCompany,
   resolveOfficeStatus,
   officeCategoryFromTitle,
   OFFICE_CATEGORY_LABELS,
   type OfficeCategory,
 } from "@/lib/office-stats";
 import {
+  contractOfficeStats,
   deriveOccupancy,
   officeDetailsMap,
   type DerivedOfficeStatus,
@@ -83,8 +85,19 @@ type ResolvedOfficeRow = {
 function simplifyStatus(s: DerivedOfficeStatus): OfficeStatus {
   if (s === "restricted") return "restricted";
   if (s === "available") return "unrented";
-  return "rented";
+  return "rented"; // reserved / active / shared / full / renewal / expired / legacy
 }
+
+const LEGEND: { label: string; cls: string }[] = [
+  { label: "Available", cls: "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
+  { label: "Reserved (unpaid)", cls: "border-amber-500/60 bg-amber-400/20 text-amber-700 dark:text-amber-300" },
+  { label: "Rented", cls: "border-border bg-muted text-muted-foreground" },
+  { label: "Shared n/N", cls: "border-teal-500/60 bg-teal-500/15 text-teal-700 dark:text-teal-300" },
+  { label: "Renewal await payment", cls: "border-orange-500/60 bg-orange-400/20 text-orange-700 dark:text-orange-300" },
+  { label: "Expired", cls: "border-destructive/60 bg-destructive/20 text-destructive" },
+  { label: "No contract yet", cls: "border-dashed border-amber-500/70 bg-muted text-muted-foreground" },
+  { label: "Restricted", cls: "border-destructive/50 bg-destructive/15 text-destructive" },
+];
 
 export default function OfficesPage() {
   const {
@@ -177,60 +190,48 @@ export default function OfficesPage() {
     [clientById],
   );
 
-  // occupancy for every office on the active floor (contract-derived)
+  // occupancy for every office on the active floor (contract-derived, with
+  // the legacy floor data as fallback so pre-contract tenants stay visible)
   const occupancyByNo = useMemo(() => {
     const m = new Map<string, OfficeOccupancy>();
     if (!currentFloor) return m;
     currentFloor.sections.forEach((sec) =>
       sec.offices.forEach((o) => {
         if (!o.no || o.no === "—") return;
-        const restricted =
-          resolveOfficeStatus(activeFloor, o.no, o.st, officeOverrides) ===
-          "restricted";
+        const legacyStatus = resolveOfficeStatus(
+          activeFloor,
+          o.no,
+          o.st,
+          officeOverrides,
+        );
+        const { company: legacyCompany } = resolveOfficeCompany(
+          activeFloor,
+          o.no,
+          o.co,
+          officeOverrides,
+          clients,
+        );
         m.set(
           o.no,
-          deriveOccupancy(activeFloor, o.no, contracts, detailsByKey, restricted),
+          deriveOccupancy(
+            activeFloor,
+            o.no,
+            contracts,
+            detailsByKey,
+            legacyStatus,
+            legacyCompany,
+          ),
         );
       }),
     );
     return m;
-  }, [currentFloor, activeFloor, contracts, detailsByKey, officeOverrides]);
+  }, [currentFloor, activeFloor, contracts, detailsByKey, officeOverrides, clients]);
 
-  // global stats across all floors (contract-derived)
-  const stats = useMemo(() => {
-    let total = 0;
-    let rented = 0;
-    let restricted = 0;
-    let free = 0;
-    Object.entries(floors).forEach(([fk, floor]) =>
-      floor.sections.forEach((sec) =>
-        sec.offices.forEach((o) => {
-          if (!o.no || o.no === "—") return;
-          total++;
-          const isRestricted =
-            resolveOfficeStatus(fk, o.no, o.st, officeOverrides) ===
-            "restricted";
-          const occ = deriveOccupancy(
-            fk,
-            o.no,
-            contracts,
-            detailsByKey,
-            isRestricted,
-          );
-          if (occ.status === "restricted") restricted++;
-          else if (occ.used > 0) rented++;
-          else free++;
-        }),
-      ),
-    );
-    return {
-      total,
-      rented,
-      free,
-      restricted,
-      rate: total ? Math.round((rented / total) * 100) : 0,
-    };
-  }, [floors, contracts, detailsByKey, officeOverrides]);
+  // global stats across all floors — same source as Dashboard & Analytics
+  const stats = useMemo(
+    () => contractOfficeStats(floors, officeOverrides, contracts, detailsByKey),
+    [floors, contracts, detailsByKey, officeOverrides],
+  );
 
   const sectionsWithOffices = useMemo(() => {
     if (!currentFloor) return [];
@@ -247,7 +248,9 @@ export default function OfficesPage() {
       let rows: ResolvedOfficeRow[] = sec.offices.map((o, oIdx) => {
         const occ = occupancyByNo.get(o.no);
         const status = occ ? simplifyStatus(occ.status) : "unrented";
-        const company = occ ? occupantLabel(occ) : "";
+        const company = occ
+          ? occupantLabel(occ) || occ.legacyOccupant || ""
+          : "";
         return {
           key: `${activeFloor}-${sIdx}-${oIdx}`,
           no: o.no,
@@ -292,7 +295,7 @@ export default function OfficesPage() {
     occupancyByNo.forEach((occ, no) => {
       map.set(no, {
         status: occ.status,
-        label: occupantLabel(occ),
+        label: occupantLabel(occ) || occ.legacyOccupant || "",
         used: occ.used,
         capacity: occ.capacity,
       });
@@ -403,27 +406,24 @@ export default function OfficesPage() {
       </div>
 
       <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-        <strong className="text-foreground">How it works:</strong> Green offices are
-        available — click one to assign a company, just like picking a seat. Click
-        any office to edit its status. When you add/edit a client with an office
-        number, that office updates automatically.{" "}
-        <Badge variant="secondary" className="ml-1 text-[0.65rem]">
-          Linked
-        </Badge>{" "}
-        = connected to a live client record.
+        <strong className="text-foreground">How it works:</strong> Click a{" "}
+        <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+          green
+        </span>{" "}
+        office to open a <strong>new contract</strong> (client, period, rate,
+        discount — an invoice is issued and the office becomes Reserved). Click
+        an <strong>occupied</strong> office to manage its contracts: upload the
+        payment receipt to activate, renew, close (frees the office) or print
+        the lease contract. Offices with an{" "}
+        <span className="font-semibold">amber dashed border</span> have a
+        recorded tenant but <strong>no contract yet</strong> — click to create
+        it.
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {(["rented", "unrented", "restricted"] as OfficeStatus[]).map((st) => (
-          <Badge
-            key={st}
-            variant="outline"
-            className={statusStyles[st].row}
-          >
-            <span className="inline-flex items-center gap-1.5">
-              <OfficeStatusIndicator status={st} />
-              {statusStyles[st].label}
-            </span>
+        {LEGEND.map((item) => (
+          <Badge key={item.label} variant="outline" className={item.cls}>
+            {item.label}
           </Badge>
         ))}
       </div>
@@ -647,6 +647,27 @@ export default function OfficesPage() {
           )}
           building={building}
           clients={clients}
+          legacyOccupant={
+            occupancyByNo.get(newContractTarget.officeNo)?.status === "legacy"
+              ? (occupancyByNo.get(newContractTarget.officeNo)?.legacyOccupant ??
+                "")
+              : undefined
+          }
+          onMarkFree={async () => {
+            try {
+              await saveOfficeEdit({
+                floorKey: newContractTarget.floorKey,
+                officeNo: newContractTarget.officeNo,
+                status: "unrented",
+                company: "",
+              });
+              toast.success("Office marked free");
+            } catch (err) {
+              toast.error(
+                err instanceof Error ? err.message : "Failed to mark free",
+              );
+            }
+          }}
           onCreate={async (input) => {
             try {
               await createContract(input);

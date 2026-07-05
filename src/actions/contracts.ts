@@ -30,6 +30,39 @@ async function requireSession() {
   return session;
 }
 
+/**
+ * Bridge: keep the client's legacy billing fields (amount / due date / rent
+ * period / status) in sync with the client's current contract period, so the
+ * Dashboard, Clients table, Alerts, comms templates and A4 invoice printing
+ * all reflect the contract without their own logic changing.
+ */
+async function syncClientBilling(
+  supabase: ReturnType<typeof createAdminClient>,
+  input: {
+    clientId: string;
+    monthlyRent: number;
+    months: number;
+    periodStart: string;
+    periodEnd: string;
+    amount: number;
+  },
+): Promise<void> {
+  await supabase
+    .from("clients")
+    .update({
+      invoice_type: "rent",
+      monthly_rent: input.monthlyRent,
+      rent_months: input.months,
+      rent_start: input.periodStart,
+      rent_end: input.periodEnd,
+      amount: input.amount,
+      due_date: input.periodEnd,
+      status: "pending",
+      paid_at: null,
+    })
+    .eq("id", input.clientId);
+}
+
 async function nextContractNo(
   supabase: ReturnType<typeof createAdminClient>,
 ): Promise<string> {
@@ -118,13 +151,21 @@ export async function createContractAction(
     .insert(invoiceToRow(invoice));
   if (iErr) throw new Error(iErr.message);
 
-  // keep the legacy client.office link in sync during the transition
+  // keep the legacy client record in sync (office link + billing fields)
   if (input.officeNo) {
     await supabase
       .from("clients")
       .update({ office: input.officeNo, type: input.clientType })
       .eq("id", input.clientId);
   }
+  await syncClientBilling(supabase, {
+    clientId: input.clientId,
+    monthlyRent: input.monthlyRent,
+    months: input.months,
+    periodStart: startDate,
+    periodEnd: endDate,
+    amount: invoice.amount,
+  });
 
   return contract;
 }
@@ -176,6 +217,15 @@ export async function renewContractAction(contractId: string): Promise<void> {
     })
     .eq("id", contractId);
   if (cErr) throw new Error(cErr.message);
+
+  await syncClientBilling(supabase, {
+    clientId: row.client_id as string,
+    monthlyRent: Number(row.monthly_rent) || 0,
+    months,
+    periodStart,
+    periodEnd,
+    amount,
+  });
 }
 
 /** Close a contract → frees the office. Creator staff or an admin only. */
@@ -247,6 +297,19 @@ export async function markInvoicePaidAction(formData: FormData): Promise<void> {
       .update({ status: "active" })
       .eq("id", inv.contract_id)
       .in("status", ["reserved", "renewal_await_payment"]);
+
+    // bridge: reflect the payment on the client record too
+    const { data: contract } = await supabase
+      .from("contracts")
+      .select("client_id")
+      .eq("id", inv.contract_id)
+      .single();
+    if (contract?.client_id) {
+      await supabase
+        .from("clients")
+        .update({ status: "paid", paid_at: new Date().toISOString() })
+        .eq("id", contract.client_id);
+    }
   }
 }
 
@@ -354,6 +417,14 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
         renewal_count: c.renewalCount + 1,
       })
       .eq("id", c.id);
+    await syncClientBilling(supabase, {
+      clientId: c.clientId,
+      monthlyRent: c.monthlyRent,
+      months,
+      periodStart,
+      periodEnd,
+      amount,
+    });
     delete reminders[c.id];
     summary.renewed++;
     const cl = clientById.get(c.clientId);

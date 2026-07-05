@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useClientStats, useOffices } from "@/providers/crm-provider";
-import { globalOfficeStats } from "@/lib/office-stats";
+import { contractOfficeStats, officeDetailsMap } from "@/lib/office-contracts";
 import { bhd } from "@/lib/format";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -51,10 +51,16 @@ function TickerStat({ label, value }: { label: string; value: string }) {
 
 export function KpiCards() {
   const stats = useClientStats();
-  const { floors, officeOverrides } = useOffices();
+  const { floors, officeOverrides, contracts, officeDetails } = useOffices();
   const officeStats = useMemo(
-    () => globalOfficeStats(floors, officeOverrides),
-    [floors, officeOverrides],
+    () =>
+      contractOfficeStats(
+        floors,
+        officeOverrides,
+        contracts,
+        officeDetailsMap(officeDetails),
+      ),
+    [floors, officeOverrides, contracts, officeDetails],
   );
 
   const items = [

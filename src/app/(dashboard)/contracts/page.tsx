@@ -19,7 +19,7 @@ export default function ContractsPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <PageHeader
           title="CR & Contracts"
-          description="Commercial registration expiry, start dates & renewal tracking"
+          description="Lease contracts, renewals & commercial-registration expiry"
         />
         <Button variant="outline" onClick={() => exportCrCsv(clients)}>
           Export CSV
@@ -52,11 +52,18 @@ export default function ContractsPage() {
         </h2>
         <p className="text-sm text-muted-foreground">
           Office contracts by expiry — search a client to see all their leases.
+          Payments and renewals are managed from the Offices page.
         </p>
         <LeaseReport />
       </div>
 
-      <ContractsTable />
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold">CR expiry tracking (clients)</h2>
+        <p className="text-sm text-muted-foreground">
+          Commercial-registration expiry dates and legacy billing per client.
+        </p>
+        <ContractsTable />
+      </div>
     </div>
   );
 }

@@ -18,12 +18,12 @@ import {
   contractsExpiringSoon,
   durationMix,
   employeeLeaderboard,
-  occupancyStats,
   revenueByMonth,
   statusBreakdown,
   timelineBuckets,
   topClientsByAmount,
 } from "@/lib/analytics";
+import { contractOfficeStats, officeDetailsMap } from "@/lib/office-contracts";
 import { bhd, fmtDate } from "@/lib/format";
 import { statusOf } from "@/lib/client-status";
 import { PageHeader } from "@/components/layout/page-header";
@@ -47,16 +47,29 @@ function truncateLabel(value: string, max = 18) {
 
 export default function AnalyticsPage() {
   const palette = useChartTheme();
-  const { clients, floors, officeOverrides } = useCrm();
+  const { clients, floors, officeOverrides, contracts, officeDetails } =
+    useCrm();
 
   const revenue = useMemo(() => revenueByMonth(clients), [clients]);
   const statusData = useMemo(() => statusBreakdown(clients), [clients]);
   const timeline = useMemo(() => timelineBuckets(clients), [clients]);
   const duration = useMemo(() => durationMix(clients), [clients]);
-  const occupancy = useMemo(
-    () => occupancyStats(floors, officeOverrides),
-    [floors, officeOverrides],
-  );
+  const occupancy = useMemo(() => {
+    const s = contractOfficeStats(
+      floors,
+      officeOverrides,
+      contracts,
+      officeDetailsMap(officeDetails),
+    );
+    return {
+      ...s,
+      chart: [
+        { name: "Rented", value: s.rented, id: "rented" },
+        { name: "Available", value: s.free, id: "free" },
+        { name: "Restricted", value: s.restricted, id: "restricted" },
+      ].filter((d) => d.value > 0),
+    };
+  }, [floors, officeOverrides, contracts, officeDetails]);
   const topClients = useMemo(
     () =>
       topClientsByAmount(clients, 8).map((c) => ({

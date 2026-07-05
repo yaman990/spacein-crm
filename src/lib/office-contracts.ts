@@ -1,4 +1,6 @@
 import type { Contract, OfficeDetails } from "@/types/contract";
+import type { FloorsMap, OfficeOverrides } from "@/types/office";
+import { resolveOfficeStatus } from "@/lib/office-stats";
 
 /** Statuses shown on the floor map / office tile (derived from contracts). */
 export type DerivedOfficeStatus =
@@ -9,6 +11,7 @@ export type DerivedOfficeStatus =
   | "expired"
   | "shared"
   | "full"
+  | "legacy" // occupied per the legacy floor data, but no contract yet
   | "restricted";
 
 // contract statuses that still occupy a slot on the office
@@ -39,19 +42,23 @@ export interface OfficeOccupancy {
   contracts: Contract[]; // the occupying contracts on this office
   hasFreeSlot: boolean;
   status: DerivedOfficeStatus;
+  /** Occupant recorded in the legacy floor data when no contract exists. */
+  legacyOccupant?: string;
 }
 
 /**
  * Works out how an office should show, from its contracts + its details.
- * `restricted` comes from the floor data / overrides (a manual, non-contract
- * state) and always wins.
+ * `legacyStatus` is the pre-contract 3-state (floor data + overrides):
+ * "restricted" always wins; "rented" with no contract becomes the `legacy`
+ * state so historical occupancy is never silently shown as available.
  */
 export function deriveOccupancy(
   floorKey: string,
   officeNo: string,
   contracts: Contract[],
   detailsByKey: Map<string, OfficeDetails>,
-  restricted: boolean,
+  legacyStatus: "rented" | "unrented" | "restricted",
+  legacyOccupant = "",
 ): OfficeOccupancy {
   const det = detailsByKey.get(detailsKey(floorKey, officeNo));
   const multiTenant = det?.multiTenant ?? false;
@@ -64,10 +71,12 @@ export function deriveOccupancy(
       OCCUPYING.has(c.status),
   );
   const used = occupying.length;
-  const hasFreeSlot = used < capacity;
+  const isLegacy = used === 0 && legacyStatus === "rented";
+  const hasFreeSlot = used < capacity && !isLegacy;
 
   let status: DerivedOfficeStatus;
-  if (restricted) status = "restricted";
+  if (legacyStatus === "restricted") status = "restricted";
+  else if (isLegacy) status = "legacy";
   else if (used === 0) status = "available";
   else if (multiTenant && used < capacity) status = "shared";
   else if (occupying.some((c) => c.status === "renewal_await_payment"))
@@ -85,6 +94,50 @@ export function deriveOccupancy(
     contracts: occupying,
     hasFreeSlot,
     status,
+    legacyOccupant: isLegacy ? legacyOccupant : undefined,
+  };
+}
+
+/**
+ * Office stats derived from contracts (plus legacy/restricted states) — the
+ * single source used by the Offices page, Dashboard KPIs and Analytics so
+ * every menu reports the same numbers.
+ */
+export function contractOfficeStats(
+  floors: FloorsMap,
+  overrides: OfficeOverrides,
+  contracts: Contract[],
+  detailsByKey: Map<string, OfficeDetails>,
+) {
+  let total = 0;
+  let rented = 0;
+  let free = 0;
+  let restricted = 0;
+  Object.entries(floors).forEach(([fk, floor]) =>
+    floor.sections.forEach((sec) =>
+      sec.offices.forEach((o) => {
+        if (!o.no || o.no === "—") return;
+        total++;
+        const legacyStatus = resolveOfficeStatus(fk, o.no, o.st, overrides);
+        const occ = deriveOccupancy(
+          fk,
+          o.no,
+          contracts,
+          detailsByKey,
+          legacyStatus,
+        );
+        if (occ.status === "restricted") restricted++;
+        else if (occ.used > 0 || occ.status === "legacy") rented++;
+        else free++;
+      }),
+    ),
+  );
+  return {
+    total,
+    rented,
+    free,
+    restricted,
+    rate: total > 0 ? Math.round((rented / total) * 100) : 0,
   };
 }
 
