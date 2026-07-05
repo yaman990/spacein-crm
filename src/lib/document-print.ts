@@ -4,48 +4,55 @@ import type { Client } from "@/types/client";
 import type { Building, Contract } from "@/types/contract";
 import type { DocumentType } from "@/lib/invoice-document";
 
+/**
+ * Prints an A4 HTML document through a hidden same-origin iframe. Unlike
+ * window.open, this needs no pop-up permission: the browser's print dialog
+ * opens directly, where the user can print or choose "Save as PDF".
+ * (The previous window.open("", "_blank", "noopener") approach returned null
+ * because of the noopener flag, leaving a blank tab that never got content.)
+ */
+function printHtmlA4(html: string) {
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.srcdoc = html;
+
+  const cleanup = () => setTimeout(() => iframe.remove(), 500);
+
+  iframe.addEventListener("load", () => {
+    const win = iframe.contentWindow;
+    if (!win) {
+      cleanup();
+      return;
+    }
+    win.addEventListener("afterprint", cleanup, { once: true });
+    // let fonts/layout settle before the print snapshot
+    setTimeout(() => {
+      win.focus();
+      win.print();
+    }, 250);
+    // fallback cleanup in case afterprint never fires
+    setTimeout(cleanup, 120_000);
+  });
+
+  document.body.appendChild(iframe);
+}
+
 export function openContractPrintWindow(
   contract: Contract,
   client: Client,
   building: Building | null,
 ) {
-  const html = buildContractDocument(contract, client, building);
-  const printWindow = window.open("", "_blank", "noopener,noreferrer");
-  if (!printWindow) {
-    alert("Please allow pop-ups to print or save as PDF.");
-    return;
-  }
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-  printWindow.focus();
-  const triggerPrint = () => printWindow.print();
-  if (printWindow.document.readyState === "complete") {
-    setTimeout(triggerPrint, 250);
-  } else {
-    printWindow.onload = () => setTimeout(triggerPrint, 250);
-  }
+  printHtmlA4(buildContractDocument(contract, client, building));
 }
 
 export function openA4PrintWindow(client: Client, type: DocumentType) {
-  const html = buildA4PrintDocument(client, type);
-  const printWindow = window.open("", "_blank", "noopener,noreferrer");
-  if (!printWindow) {
-    alert("Please allow pop-ups to print or save as PDF.");
-    return;
-  }
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-  printWindow.focus();
-  const triggerPrint = () => {
-    printWindow.print();
-  };
-  if (printWindow.document.readyState === "complete") {
-    setTimeout(triggerPrint, 250);
-  } else {
-    printWindow.onload = () => setTimeout(triggerPrint, 250);
-  }
+  printHtmlA4(buildA4PrintDocument(client, type));
 }
 
 export function downloadA4Pdf(client: Client, type: DocumentType) {
