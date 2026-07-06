@@ -589,7 +589,7 @@ export default function OfficesPage() {
                         <TableRow
                           key={row.key}
                           className={`cursor-pointer ${style.row}`}
-                          onClick={() => openEdit(activeFloor, row.no)}
+                          onClick={() => selectOffice(row.no)}
                         >
                           <TableCell className="font-mono text-sm font-bold">
                             {row.no}
