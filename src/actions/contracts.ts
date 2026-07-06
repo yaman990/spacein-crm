@@ -170,6 +170,210 @@ export async function createContractAction(
   return contract;
 }
 
+export interface UpdateContractInput {
+  contractId: string;
+  clientId?: string;
+  floorKey?: string;
+  officeNo?: string;
+  clientType?: ClientType;
+  monthlyRent?: number;
+  months?: number;
+  startDate?: string;
+  discountValue?: number;
+  discountKind?: DiscountKind;
+  discountScope?: DiscountScope;
+  endAction?: EndAction;
+  renewalMonths?: number;
+}
+
+/**
+ * Corrects a contract (staff who created it, or an admin).
+ *
+ * - While the current period's invoice is UNPAID: everything can be corrected
+ *   (client, office, rent, term, start date, discount, renewal settings) and
+ *   the open invoice is regenerated with the corrected period/amount.
+ * - Once the period is PAID: only forward-looking settings (end action and
+ *   renewal period) can change — paid amounts are never silently rewritten;
+ *   for those cases close the contract and recreate it.
+ */
+export async function updateContractAction(
+  input: UpdateContractInput,
+): Promise<void> {
+  const session = await requireSession();
+  const supabase = createAdminClient();
+
+  const { data: row, error } = await supabase
+    .from("contracts")
+    .select("*")
+    .eq("id", input.contractId)
+    .single();
+  if (error || !row) throw new Error("Contract not found");
+
+  const isAdmin = session.user.role === "admin";
+  const isCreator = row.created_by_staff_id === session.user.id;
+  if (!isAdmin && !isCreator) {
+    throw new Error(
+      "Only the staff who created this contract, or an admin, can edit it",
+    );
+  }
+  if (row.status === "closed") throw new Error("This contract is closed");
+
+  // the open (unpaid) invoice of the current period, if any
+  const { data: invoices } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("contract_id", input.contractId)
+    .eq("status", "issued")
+    .order("period_end", { ascending: false })
+    .limit(1);
+  const openInvoice = invoices?.[0];
+
+  const financialKeys = [
+    "clientId",
+    "floorKey",
+    "officeNo",
+    "clientType",
+    "monthlyRent",
+    "months",
+    "startDate",
+    "discountValue",
+    "discountKind",
+    "discountScope",
+  ] as const;
+  const wantsFinancialEdit = financialKeys.some(
+    (k) => input[k] !== undefined,
+  );
+
+  if (!openInvoice && wantsFinancialEdit) {
+    throw new Error(
+      "This period is already paid — only the renewal settings can be changed. To fix paid data, close the contract and create it again.",
+    );
+  }
+
+  const changes: string[] = [];
+  const patch: Record<string, unknown> = {};
+
+  if (input.endAction && input.endAction !== row.end_action) {
+    patch.end_action = input.endAction;
+    changes.push(`end action → ${input.endAction}`);
+  }
+  if (
+    input.renewalMonths !== undefined &&
+    input.renewalMonths !== Number(row.renewal_months)
+  ) {
+    patch.renewal_months = input.renewalMonths;
+    changes.push(`renewal period → ${input.renewalMonths} mo`);
+  }
+
+  if (openInvoice && wantsFinancialEdit) {
+    const isFirstPeriod = Number(row.renewal_count) === 0;
+    const monthlyRent = input.monthlyRent ?? Number(row.monthly_rent);
+    const months =
+      input.months ??
+      Number(isFirstPeriod ? row.months : row.renewal_months) ??
+      12;
+    const periodStart =
+      input.startDate ?? (openInvoice.period_start as string);
+    const periodEnd = addMonths(periodStart, months);
+    const discountValue = input.discountValue ?? Number(row.discount_value);
+    const discountKind =
+      input.discountKind ?? (row.discount_kind as DiscountKind);
+    const discountScope =
+      input.discountScope ?? (row.discount_scope as DiscountScope);
+    const discountApplies =
+      isFirstPeriod || discountScope === "every_period" ? discountValue : 0;
+    const amount = periodAmount(
+      monthlyRent,
+      months,
+      discountApplies,
+      discountKind,
+    );
+
+    if (input.clientId && input.clientId !== row.client_id) {
+      patch.client_id = input.clientId;
+      changes.push("client changed");
+    }
+    if (input.officeNo && input.officeNo !== row.office_no) {
+      patch.floor_key = input.floorKey ?? row.floor_key;
+      patch.office_no = input.officeNo;
+      changes.push(`office → ${input.officeNo}`);
+    }
+    if (input.clientType) patch.client_type = input.clientType;
+    if (monthlyRent !== Number(row.monthly_rent)) {
+      patch.monthly_rent = monthlyRent;
+      changes.push(`rent → ${monthlyRent}/mo`);
+    }
+    patch.discount_value = discountValue;
+    patch.discount_kind = discountKind;
+    patch.discount_scope = discountScope;
+    if (isFirstPeriod) {
+      patch.months = months;
+      patch.start_date = periodStart;
+    } else {
+      patch.renewal_months = input.renewalMonths ?? months;
+    }
+    patch.end_date = periodEnd;
+    if (
+      months !==
+      Number(isFirstPeriod ? row.months : row.renewal_months)
+    ) {
+      changes.push(`term → ${months} mo`);
+    }
+    if (periodStart !== openInvoice.period_start) {
+      changes.push(`start → ${periodStart}`);
+    }
+
+    const { error: iErr } = await supabase
+      .from("invoices")
+      .update({
+        period_start: periodStart,
+        period_end: periodEnd,
+        amount,
+      })
+      .eq("id", openInvoice.id);
+    if (iErr) throw new Error(iErr.message);
+
+    const targetClient = (patch.client_id as string) ?? row.client_id;
+    await syncClientBilling(supabase, {
+      clientId: targetClient,
+      monthlyRent,
+      months,
+      periodStart,
+      periodEnd,
+      amount,
+    });
+    if (patch.office_no || patch.client_type) {
+      await supabase
+        .from("clients")
+        .update({
+          office: (patch.office_no as string) ?? row.office_no,
+          type: (patch.client_type as string) ?? row.client_type,
+        })
+        .eq("id", targetClient);
+    }
+  }
+
+  if (Object.keys(patch).length === 0) return;
+
+  const { error: cErr } = await supabase
+    .from("contracts")
+    .update(patch)
+    .eq("id", input.contractId);
+  if (cErr) throw new Error(cErr.message);
+
+  if (changes.length > 0) {
+    await supabase.from("activity_log").insert({
+      id: uid(),
+      type: "created",
+      cid: (patch.client_id as string) ?? row.client_id,
+      cname: session.user.name ?? "",
+      description: `Contract ${row.contract_no} corrected: ${changes.join(", ")}`,
+      amt: null,
+      ts: new Date().toISOString(),
+    });
+  }
+}
+
 /** Renew a contract: extend to the next period + issue its (unpaid) invoice. */
 export async function renewContractAction(contractId: string): Promise<void> {
   await requireSession();

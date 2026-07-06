@@ -31,6 +31,11 @@ import {
 } from "@/components/offices/office-floor-map";
 import { NewContractDialog } from "@/components/contracts/new-contract-dialog";
 import { ContractDetailDialog } from "@/components/contracts/contract-detail-dialog";
+import {
+  EditContractDialog,
+  type OfficeOption,
+} from "@/components/contracts/edit-contract-dialog";
+import type { Contract } from "@/types/contract";
 import { OfficeSetupDialog } from "@/components/offices/office-setup-dialog";
 import { FLOOR5_LAYOUT } from "@/data/floor5-layout";
 import { FloorManagerDialog } from "@/components/offices/floor-manager-dialog";
@@ -116,6 +121,7 @@ export default function OfficesPage() {
     getReceiptUrl,
     renewContract,
     closeContract,
+    updateContract,
     runContractChecks,
   } = useOffices();
   const { data: session } = useSession();
@@ -145,6 +151,7 @@ export default function OfficesPage() {
     officeNo: string;
   } | null>(null);
   const [detailOfficeNo, setDetailOfficeNo] = useState<string | null>(null);
+  const [editContract, setEditContract] = useState<Contract | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<{
     floorKey: string;
@@ -302,6 +309,31 @@ export default function OfficesPage() {
     });
     return map;
   }, [occupancyByNo, occupantLabel]);
+
+  // Offices a contract can be corrected to: any office with a free slot on
+  // any floor, plus the contract's current office.
+  const officeOptions = useMemo<OfficeOption[]>(() => {
+    const out: OfficeOption[] = [];
+    Object.entries(floors).forEach(([fk, floor]) =>
+      floor.sections.forEach((sec) =>
+        sec.offices.forEach((o) => {
+          if (!o.no || o.no === "—") return;
+          const legacyStatus = resolveOfficeStatus(fk, o.no, o.st, officeOverrides);
+          const occ = deriveOccupancy(fk, o.no, contracts, detailsByKey, legacyStatus);
+          const isCurrent =
+            editContract?.floorKey === fk && editContract?.officeNo === o.no;
+          if (occ.hasFreeSlot || isCurrent) {
+            out.push({
+              floorKey: fk,
+              officeNo: o.no,
+              label: `${o.no} — ${floor.label}${isCurrent ? " (current)" : ""}`,
+            });
+          }
+        }),
+      ),
+    );
+    return out.sort((a, b) => Number(a.officeNo) - Number(b.officeNo));
+  }, [floors, officeOverrides, contracts, detailsByKey, editContract]);
 
   // Office numbers passing the active filters — highlighted on the map.
   const matchedNos = useMemo(() => {
@@ -696,6 +728,10 @@ export default function OfficesPage() {
         getReceiptUrl={getReceiptUrl}
         onRenew={renewContract}
         onClose={closeContract}
+        onEdit={(c) => {
+          setEditContract(c);
+          setDetailOfficeNo(null);
+        }}
         onAddContract={() => {
           if (detailOfficeNo) {
             setNewContractTarget({ floorKey: activeFloor, officeNo: detailOfficeNo });
@@ -703,6 +739,21 @@ export default function OfficesPage() {
           }
         }}
       />
+
+      {editContract && (
+        <EditContractDialog
+          key={editContract.id}
+          open={!!editContract}
+          onOpenChange={(open) => !open && setEditContract(null)}
+          contract={editContract}
+          clients={clients}
+          officeOptions={officeOptions}
+          canEditFinancials={invoices.some(
+            (i) => i.contractId === editContract.id && i.status === "issued",
+          )}
+          onSave={updateContract}
+        />
+      )}
 
       <OfficeSetupDialog
         open={setupOpen}

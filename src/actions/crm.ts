@@ -19,6 +19,7 @@ import {
   rowToOfficeDetails,
   rowsToFloors,
 } from "@/lib/supabase/mappers";
+import { overlayClientBilling } from "@/lib/client-billing";
 import type { ActivityType } from "@/types/activity";
 import type { Client, ClientInput, ClientStatus } from "@/types/client";
 import type { FloorsMap, OfficeOverrides } from "@/types/office";
@@ -127,7 +128,12 @@ export async function fetchCrmData(): Promise<{
   if (settingsRes.error) throw new Error(settingsRes.error.message);
 
   return {
-    clients: (clientsRes.data ?? []).map(rowToClient),
+    // contracts are the source of truth for billing — overlay the client rows
+    clients: overlayClientBilling(
+      (clientsRes.data ?? []).map(rowToClient),
+      contractsData.contracts,
+      contractsData.invoices,
+    ),
     activityLog: (logRes.data ?? []).map(rowToActivity),
     officeOverrides: overridesToMap(overridesRes.data ?? []),
     floors: rowsToFloors(
@@ -222,6 +228,21 @@ export async function deleteClientAction(id: string): Promise<void> {
     .eq("id", id)
     .single();
   if (fetchErr || !existing) throw new Error("Client not found");
+
+  // A client with a live contract can't be deleted — the contract would be
+  // orphaned. Close the contract first (which frees the office).
+  const { data: liveContracts } = await supabase
+    .from("contracts")
+    .select("contract_no")
+    .eq("client_id", id)
+    .in("status", ["reserved", "active", "renewal_await_payment", "expired"]);
+  if (liveContracts && liveContracts.length > 0) {
+    throw new Error(
+      `This client has ${liveContracts.length} open contract(s) (${liveContracts
+        .map((c) => c.contract_no)
+        .join(", ")}) — close them from the Offices page first.`,
+    );
+  }
 
   const removed = rowToClient(existing);
   const { error } = await supabase.from("clients").delete().eq("id", id);

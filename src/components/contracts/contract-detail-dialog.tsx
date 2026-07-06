@@ -37,6 +37,7 @@ export function ContractDetailDialog({
   getReceiptUrl,
   onRenew,
   onClose,
+  onEdit,
   onAddContract,
 }: {
   open: boolean;
@@ -50,6 +51,7 @@ export function ContractDetailDialog({
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   onRenew: (contractId: string) => Promise<void>;
   onClose: (contractId: string) => Promise<void>;
+  onEdit: (contract: Contract) => void;
   onAddContract: () => void;
 }) {
   if (!occupancy) return null;
@@ -80,6 +82,7 @@ export function ContractDetailDialog({
               getReceiptUrl={getReceiptUrl}
               onRenew={onRenew}
               onClose={onClose}
+              onEdit={onEdit}
               building={building}
             />
           ))}
@@ -103,6 +106,7 @@ function ContractCard({
   getReceiptUrl,
   onRenew,
   onClose,
+  onEdit,
   building,
 }: {
   contract: Contract;
@@ -112,6 +116,7 @@ function ContractCard({
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   onRenew: (contractId: string) => Promise<void>;
   onClose: (contractId: string) => Promise<void>;
+  onEdit: (contract: Contract) => void;
   building: Building | null;
 }) {
   const meta = STATUS_META[contract.status];
@@ -176,6 +181,14 @@ function ContractCard({
       </div>
 
       <div className="mt-3 flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy !== null}
+          onClick={() => onEdit(contract)}
+        >
+          Edit
+        </Button>
         {client && (
           <Button
             size="sm"

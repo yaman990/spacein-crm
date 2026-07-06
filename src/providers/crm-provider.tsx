@@ -30,18 +30,14 @@ import {
   runContractChecksAction,
   saveBuildingAction,
   saveOfficeDetailsAction,
+  updateContractAction,
   type ChecksSummary,
   type CreateContractInput,
+  type UpdateContractInput,
 } from "@/actions/contracts";
-import { addMonths } from "@/lib/format";
 import { statusOf } from "@/lib/client-status";
 import type { ActivityLogEntry } from "@/types/activity";
-import type {
-  Client,
-  ClientInput,
-  ClientStatus,
-  ClientType,
-} from "@/types/client";
+import type { Client, ClientInput, ClientType } from "@/types/client";
 import type { FloorsMap, OfficeOverrides } from "@/types/office";
 import type {
   Building,
@@ -91,6 +87,7 @@ interface CrmContextValue extends CrmSnapshot {
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   renewContract: (contractId: string) => Promise<void>;
   closeContract: (contractId: string) => Promise<void>;
+  updateContract: (input: UpdateContractInput) => Promise<void>;
   runContractChecks: () => Promise<ChecksSummary>;
 }
 
@@ -281,6 +278,14 @@ export function CrmProvider({
     [refresh],
   );
 
+  const updateContract = useCallback(
+    async (input: UpdateContractInput) => {
+      await updateContractAction(input);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const runContractChecks = useCallback(async () => {
     const s = await runContractChecksAction();
     await refresh();
@@ -317,6 +322,7 @@ export function CrmProvider({
       getReceiptUrl,
       renewContract,
       closeContract,
+      updateContract,
       runContractChecks,
     }),
     [
@@ -347,6 +353,7 @@ export function CrmProvider({
       getReceiptUrl,
       renewContract,
       closeContract,
+      updateContract,
       runContractChecks,
     ],
   );
@@ -408,6 +415,7 @@ export function useOffices() {
     getReceiptUrl,
     renewContract,
     closeContract,
+    updateContract,
     runContractChecks,
   } = useCrm();
   return {
@@ -431,6 +439,7 @@ export function useOffices() {
     getReceiptUrl,
     renewContract,
     closeContract,
+    updateContract,
     runContractChecks,
   };
 }
@@ -440,6 +449,11 @@ export function useContracts() {
   return { contracts, invoices, clients, isHydrated, isSyncing };
 }
 
+/**
+ * Builds a new-client payload from the identity-only form. Financial fields
+ * get neutral defaults — they are owned by the client's contracts and are
+ * overlaid from contract data whenever the client has one.
+ */
 export function buildClientFromForm(values: {
   name: string;
   company: string;
@@ -449,31 +463,10 @@ export function buildClientFromForm(values: {
   rank: string;
   office: string;
   joinDate: string;
-  status: ClientStatus;
-  invoiceType: "subscription" | "rent";
-  amount: number;
-  dueDate: string;
-  monthlyRent: number;
-  rentStart: string;
-  rentMonths: number;
   rentedBy: string;
   notes: string;
   crExpiry: string;
 }): ClientInput {
-  const isRent = values.invoiceType === "rent";
-  let amount = values.amount;
-  let dueDate = values.dueDate;
-  let rentEnd = "";
-  const monthlyRent = values.monthlyRent;
-  const rentStart = values.rentStart;
-  const rentMonths = values.rentMonths;
-
-  if (isRent) {
-    rentEnd = addMonths(rentStart, rentMonths);
-    amount = monthlyRent * rentMonths;
-    dueDate = rentEnd;
-  }
-
   return {
     name: values.name.trim(),
     company: values.company.trim(),
@@ -483,14 +476,10 @@ export function buildClientFromForm(values: {
     rank: values.rank.trim(),
     office: values.office.trim(),
     joinDate: values.joinDate,
-    status: values.status,
-    invoiceType: values.invoiceType,
-    amount,
-    dueDate,
-    monthlyRent: isRent ? monthlyRent : undefined,
-    rentStart: isRent ? rentStart : undefined,
-    rentMonths: isRent ? rentMonths : undefined,
-    rentEnd: isRent ? rentEnd : undefined,
+    status: "pending",
+    invoiceType: "subscription",
+    amount: 0,
+    dueDate: "",
     rentedBy: values.rentedBy.trim(),
     notes: values.notes.trim(),
     crExpiry: values.crExpiry,

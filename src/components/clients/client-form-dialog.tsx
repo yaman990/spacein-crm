@@ -9,7 +9,6 @@ import {
   useClients,
   useCrm,
 } from "@/providers/crm-provider";
-import { addMonths, bhd } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,6 +29,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+// The client record holds identity data only. Everything financial (rent,
+// invoices, due dates, payment status) lives on the client's contracts and is
+// managed from the Offices page.
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
   company: z.string(),
@@ -39,13 +41,6 @@ const schema = z.object({
   rank: z.string(),
   office: z.string(),
   joinDate: z.string(),
-  status: z.enum(["pending", "sent", "paid", "overdue"]),
-  invoiceType: z.enum(["subscription", "rent"]),
-  amount: z.coerce.number().min(0),
-  dueDate: z.string(),
-  monthlyRent: z.coerce.number().min(0),
-  rentStart: z.string(),
-  rentMonths: z.coerce.number().min(1),
   rentedBy: z.string(),
   notes: z.string(),
   crExpiry: z.string(),
@@ -62,13 +57,6 @@ const emptyForm = (): FormState => ({
   rank: "",
   office: "",
   joinDate: "",
-  status: "pending",
-  invoiceType: "subscription",
-  amount: 0,
-  dueDate: "",
-  monthlyRent: 0,
-  rentStart: "",
-  rentMonths: 12,
   rentedBy: "",
   notes: "",
   crExpiry: "",
@@ -84,13 +72,6 @@ function clientToForm(client: Client): FormState {
     rank: client.rank,
     office: client.office,
     joinDate: client.joinDate,
-    status: client.status,
-    invoiceType: client.invoiceType,
-    amount: client.amount,
-    dueDate: client.dueDate,
-    monthlyRent: client.monthlyRent ?? 0,
-    rentStart: client.rentStart ?? "",
-    rentMonths: client.rentMonths ?? 12,
     rentedBy: client.rentedBy,
     notes: client.notes,
     crExpiry: client.crExpiry ?? "",
@@ -119,15 +100,6 @@ export function ClientFormDialog({
     onOpenChange(next);
   }
 
-  const isRent = form.invoiceType === "rent";
-  const rentPreview =
-    isRent && form.monthlyRent && form.rentStart
-      ? {
-          end: addMonths(form.rentStart, form.rentMonths),
-          total: form.monthlyRent * form.rentMonths,
-        }
-      : null;
-
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
@@ -139,19 +111,28 @@ export function ClientFormDialog({
       toast.error(parsed.error.issues[0]?.message ?? "Invalid form");
       return;
     }
-    if (isRent && (!form.monthlyRent || !form.rentStart)) {
-      toast.error("Enter monthly rent and start date");
-      return;
-    }
 
-    const payload = buildClientFromForm(parsed.data);
     try {
       setSubmitting(true);
       if (isEdit && client) {
-        await updateClient(client.id, payload);
+        // identity fields only — billing comes from contracts, and the office
+        // link is managed by the contract itself
+        const v = parsed.data;
+        await updateClient(client.id, {
+          name: v.name.trim(),
+          company: v.company.trim(),
+          type: v.type,
+          phone: v.phone.trim(),
+          email: v.email.trim(),
+          rank: v.rank.trim(),
+          joinDate: v.joinDate,
+          rentedBy: v.rentedBy.trim(),
+          notes: v.notes.trim(),
+          crExpiry: v.crExpiry,
+        });
         toast.success("Client updated");
       } else {
-        await addClient(payload);
+        await addClient(buildClientFromForm(parsed.data));
         toast.success("Client added");
       }
       handleOpenChange(false);
@@ -169,6 +150,10 @@ export function ClientFormDialog({
           <DialogTitle className="text-lg font-semibold">
             {isEdit ? "Edit Client" : "Add New Client"}
           </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Identity details only — rent, invoices and payments are managed by
+            the client&apos;s contracts on the Offices page.
+          </p>
         </DialogHeader>
         <DialogBody>
           <form
@@ -176,200 +161,101 @@ export function ClientFormDialog({
             onSubmit={handleSubmit}
             className="grid gap-4 sm:grid-cols-2"
           >
-          <Field label="Full Name *">
-            <Input
-              value={form.name}
-              onChange={(e) => set("name", e.target.value)}
-              placeholder="Ahmed Al Mansouri"
-            />
-          </Field>
-          <Field label="Company">
-            <Input
-              value={form.company}
-              onChange={(e) => set("company", e.target.value)}
-            />
-          </Field>
-          <Field label="Type">
-            <Select
-              value={form.type}
-              onValueChange={(v) =>
-                set("type", (v as FormState["type"]) ?? "commercial")
+            <Field label="Full Name *">
+              <Input
+                value={form.name}
+                onChange={(e) => set("name", e.target.value)}
+                placeholder="Ahmed Al Mansouri"
+              />
+            </Field>
+            <Field label="Company">
+              <Input
+                value={form.company}
+                onChange={(e) => set("company", e.target.value)}
+              />
+            </Field>
+            <Field label="Type">
+              <Select
+                value={form.type}
+                onValueChange={(v) =>
+                  set("type", (v as FormState["type"]) ?? "commercial")
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="commercial">Commercial</SelectItem>
+                  <SelectItem value="individual">Individual</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Phone">
+              <Input
+                value={form.phone}
+                onChange={(e) => set("phone", e.target.value)}
+              />
+            </Field>
+            <Field label="Email">
+              <Input
+                type="email"
+                value={form.email}
+                onChange={(e) => set("email", e.target.value)}
+              />
+            </Field>
+            <Field label="CR Number">
+              <Input
+                value={form.rank}
+                onChange={(e) => set("rank", e.target.value)}
+              />
+            </Field>
+            <Field label="CR Expiry Date">
+              <Input
+                type="date"
+                value={form.crExpiry}
+                onChange={(e) => set("crExpiry", e.target.value)}
+              />
+            </Field>
+            <Field label="Join Date">
+              <Input
+                type="date"
+                value={form.joinDate}
+                onChange={(e) => set("joinDate", e.target.value)}
+              />
+            </Field>
+            <Field
+              label={
+                isEdit ? "Office (managed by contracts)" : "Office (optional)"
               }
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="commercial">Commercial</SelectItem>
-                <SelectItem value="individual">Individual</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Phone">
-            <Input
-              value={form.phone}
-              onChange={(e) => set("phone", e.target.value)}
-            />
-          </Field>
-          <Field label="Email">
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(e) => set("email", e.target.value)}
-            />
-          </Field>
-          <Field label="CR Number">
-            <Input
-              value={form.rank}
-              onChange={(e) => set("rank", e.target.value)}
-            />
-          </Field>
-          <Field label="Office No. (set automatically by contracts)">
-            <Input
-              value={form.office}
-              onChange={(e) => set("office", e.target.value)}
-              placeholder="Assign via Offices → New contract"
-            />
-          </Field>
-          <Field label="Join Date">
-            <Input
-              type="date"
-              value={form.joinDate}
-              onChange={(e) => set("joinDate", e.target.value)}
-            />
-          </Field>
-          <Field label="Status">
-            <Select
-              value={form.status}
-              onValueChange={(v) =>
-                set("status", v as FormState["status"])
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="sent">Invoice Sent</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Invoice Type">
-            <Select
-              value={form.invoiceType}
-              onValueChange={(v) =>
-                set("invoiceType", v as FormState["invoiceType"])
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="subscription">Subscription</SelectItem>
-                <SelectItem value="rent">Rent</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          {!isRent ? (
-            <>
-              <Field label="Amount (BHD) *">
-                <Input
-                  type="number"
-                  step="0.001"
-                  value={form.amount || ""}
-                  onChange={(e) => set("amount", Number(e.target.value))}
-                />
-              </Field>
-              <Field label="Due Date">
-                <Input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) => set("dueDate", e.target.value)}
-                />
-              </Field>
-            </>
-          ) : (
-            <>
-              <Field label="Monthly Rent (BHD) *">
-                <Input
-                  type="number"
-                  step="0.001"
-                  value={form.monthlyRent || ""}
-                  onChange={(e) =>
-                    set("monthlyRent", Number(e.target.value))
-                  }
-                />
-              </Field>
-              <Field label="Start Date *">
-                <Input
-                  type="date"
-                  value={form.rentStart}
-                  onChange={(e) => set("rentStart", e.target.value)}
-                />
-              </Field>
-              <Field label="Duration (Months)">
-                <Select
-                  value={String(form.rentMonths)}
-                  onValueChange={(v) => set("rentMonths", Number(v))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 6, 12, 24].map((m) => (
-                      <SelectItem key={m} value={String(m)}>
-                        {m} Month{m > 1 ? "s" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              {rentPreview && (
-                <div className="col-span-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Rent summary
-                  </p>
-                  <p className="mt-1 text-muted-foreground">
-                    Total: <strong className="text-foreground">{bhd(rentPreview.total)}</strong>
-                    {" · "}Due: {rentPreview.end}
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-
-          <div className="col-span-2 rounded-lg border border-border bg-muted/30 p-3">
-            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Rented By (Employee)
-            </Label>
-            <Input
-              className="mt-1"
-              value={form.rentedBy}
-              onChange={(e) => set("rentedBy", e.target.value)}
-              placeholder="Employee who handled this client"
-            />
-          </div>
-
-          <Field label="CR Expiry Date">
-            <Input
-              type="date"
-              value={form.crExpiry}
-              onChange={(e) => set("crExpiry", e.target.value)}
-            />
-          </Field>
-          <div className="col-span-2">
-            <Label className="text-xs font-semibold uppercase text-muted-foreground">
-              Notes
-            </Label>
-            <Textarea
-              className="mt-1"
-              value={form.notes}
-              onChange={(e) => set("notes", e.target.value)}
-            />
-          </div>
+              <Input
+                value={form.office}
+                onChange={(e) => set("office", e.target.value)}
+                disabled={isEdit}
+                placeholder="Assigned via Offices → New contract"
+              />
+            </Field>
+            <div className="col-span-2 rounded-lg border border-border bg-muted/30 p-3">
+              <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Rented By (Employee)
+              </Label>
+              <Input
+                className="mt-1"
+                value={form.rentedBy}
+                onChange={(e) => set("rentedBy", e.target.value)}
+                placeholder="Employee who handled this client"
+              />
+            </div>
+            <div className="col-span-2">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                Notes
+              </Label>
+              <Textarea
+                className="mt-1"
+                value={form.notes}
+                onChange={(e) => set("notes", e.target.value)}
+              />
+            </div>
           </form>
         </DialogBody>
         <DialogFooter>
