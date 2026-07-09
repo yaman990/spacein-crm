@@ -133,7 +133,7 @@ export default function OfficesPage() {
     try {
       const s = await runContractChecks();
       toast.success(
-        `Checks done — renewed ${s.renewed}, expired ${s.expired}, reminded ${s.reminded}` +
+        `Checks done — renewed ${s.renewed}, expired ${s.expired}, reminded ${s.reminded}, cycle invoices ${s.cyclesInvoiced}` +
           (s.emailsSent ? `, ${s.emailsSent} emails sent` : "") +
           (s.emailErrors ? `, ${s.emailErrors} email errors` : ""),
       );
@@ -750,6 +750,9 @@ export default function OfficesPage() {
           officeOptions={officeOptions}
           canEditFinancials={invoices.some(
             (i) => i.contractId === editContract.id && i.status === "issued",
+          )}
+          hasPaidHistory={invoices.some(
+            (i) => i.contractId === editContract.id && i.status === "paid",
           )}
           onSave={updateContract}
         />

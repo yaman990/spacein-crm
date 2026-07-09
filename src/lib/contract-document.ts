@@ -112,7 +112,9 @@ export function buildContractDocument(
       fmtDate(contract.startDate),
     )} and ending on ${esc(fmtDate(contract.endDate))}.</p>
     <p><b>Rental Amount:</b> BD ${esc(contract.monthlyRent)} per Month.</p>
-    <p><b>Payment method:</b> To be paid every ${esc(contract.months)} month(s) in advance.</p>
+    <p><b>Payment method:</b> To be paid every ${esc(
+      contract.paymentMonths || contract.months,
+    )} month(s) in advance.</p>
   </div>
 
   <table class="clauses">${clauseRows}</table>

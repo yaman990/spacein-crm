@@ -154,7 +154,9 @@ function ContractCard({
         <div>
           <p className="font-semibold">{client?.company || client?.name || "—"}</p>
           <p className="text-xs text-muted-foreground">
-            {contract.contractNo} · {contract.clientType} · {contract.months} mo ·{" "}
+            {contract.contractNo} · {contract.clientType} · term{" "}
+            {contract.months} mo · pays every{" "}
+            {contract.paymentMonths || contract.months} mo ·{" "}
             {contract.startDate} → {contract.endDate}
             {contract.renewalCount > 0 && ` · renewed ×${contract.renewalCount}`}
           </p>

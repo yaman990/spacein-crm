@@ -9,9 +9,10 @@ import type { Contract, Invoice } from "@/types/contract";
  * keep their stored legacy values.
  *
  * Rules:
- * - The headline amount/due date come from the most urgent OPEN invoice
- *   (earliest period end). Status stays "sent" if staff already sent the
- *   invoice, otherwise "pending" (overdue is computed at read time).
+ * - Rent is paid IN ADVANCE: each cycle invoice is due on its period START
+ *   date. The headline amount/due date come from the most urgent open
+ *   invoice (earliest period start). Status stays "sent" if staff already
+ *   sent the invoice, otherwise "pending" (overdue computes at read time).
  * - If every invoice is paid, the latest paid invoice drives amount/paid-at
  *   and the status is "paid".
  */
@@ -45,7 +46,7 @@ export function overlayClientBilling(
     for (const contract of live) {
       for (const inv of invoicesByContract.get(contract.id) ?? []) {
         if (inv.status === "issued") {
-          if (!open || inv.periodEnd < open.inv.periodEnd)
+          if (!open || inv.periodStart < open.inv.periodStart)
             open = { inv, contract };
         } else if (!lastPaid || inv.periodEnd > lastPaid.inv.periodEnd) {
           lastPaid = { inv, contract };
@@ -61,12 +62,12 @@ export function overlayClientBilling(
       office: contract.officeNo || client.office,
       invoiceType: "rent" as const,
       amount: inv.amount,
-      dueDate: inv.periodEnd,
+      // paid in advance — the invoice is due when its cycle starts
+      dueDate: inv.periodStart,
       monthlyRent: contract.monthlyRent,
       rentStart: inv.periodStart,
       rentEnd: inv.periodEnd,
-      rentMonths:
-        contract.renewalCount > 0 ? contract.renewalMonths : contract.months,
+      rentMonths: contract.paymentMonths || contract.months,
       status: open
         ? client.status === "sent"
           ? ("sent" as const)

@@ -3,10 +3,10 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { addMonths } from "@/lib/format";
-import { periodAmount } from "@/types/contract";
+import { monthsBetween } from "@/lib/contract-checks";
+import { periodAmount, TERM_PRESETS, PAYMENT_PRESETS } from "@/types/contract";
 import type {
   Contract,
-  ContractTerm,
   DiscountKind,
   DiscountScope,
   EndAction,
@@ -32,8 +32,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const TERMS: ContractTerm[] = [3, 6, 9, 12];
-
 export interface OfficeOption {
   floorKey: string;
   officeNo: string;
@@ -47,6 +45,7 @@ export function EditContractDialog({
   clients,
   officeOptions,
   canEditFinancials,
+  hasPaidHistory,
   onSave,
 }: {
   open: boolean;
@@ -54,8 +53,10 @@ export function EditContractDialog({
   contract: Contract;
   clients: Client[];
   officeOptions: OfficeOption[];
-  /** true while the current period's invoice is unpaid */
+  /** true while there is an unpaid (open) invoice */
   canEditFinancials: boolean;
+  /** true once any cycle of this contract has been paid */
+  hasPaidHistory: boolean;
   onSave: (input: UpdateContractInput) => Promise<void>;
 }) {
   const [clientId, setClientId] = useState(contract.clientId);
@@ -66,9 +67,12 @@ export function EditContractDialog({
     `${contract.floorKey ?? ""}|${contract.officeNo ?? ""}`,
   );
   const [monthlyRent, setMonthlyRent] = useState(contract.monthlyRent);
-  const isFirstPeriod = contract.renewalCount === 0;
-  const [months, setMonths] = useState(
-    isFirstPeriod ? contract.months : contract.renewalMonths,
+  const [months, setMonths] = useState(contract.months);
+  const [customTerm, setCustomTerm] = useState(
+    !TERM_PRESETS.includes(contract.months as (typeof TERM_PRESETS)[number]),
+  );
+  const [paymentMonths, setPaymentMonths] = useState(
+    contract.paymentMonths || contract.months,
   );
   const [startDate, setStartDate] = useState(contract.startDate);
   const [discountValue, setDiscountValue] = useState(contract.discountValue);
@@ -87,10 +91,27 @@ export function EditContractDialog({
     [clients],
   );
 
-  const discountApplies =
-    isFirstPeriod || discountScope === "every_period" ? discountValue : 0;
-  const total = periodAmount(monthlyRent, months, discountApplies, discountKind);
+  // identity (client / office / start / term) locks once anything is paid;
+  // cycle settings (rent / discount / payment terms) lock only when there is
+  // no open invoice to regenerate
+  const canEditIdentity = canEditFinancials && !hasPaidHistory;
+
   const endDate = startDate ? addMonths(startDate, months) : contract.endDate;
+  const cycleMonthsEff = Math.max(1, Math.min(paymentMonths, months));
+  let cycleEnd = startDate ? addMonths(startDate, cycleMonthsEff) : "";
+  if (endDate && cycleEnd > endDate) cycleEnd = endDate;
+  const cycleMonths =
+    startDate && cycleEnd
+      ? Math.max(1, monthsBetween(startDate, cycleEnd))
+      : cycleMonthsEff;
+  const discountApplies =
+    !hasPaidHistory || discountScope === "every_period" ? discountValue : 0;
+  const cycleAmount = periodAmount(
+    monthlyRent,
+    cycleMonths,
+    discountApplies,
+    discountKind,
+  );
 
   async function submit() {
     setBusy(true);
@@ -102,18 +123,21 @@ export function EditContractDialog({
         renewalMonths,
       };
       if (canEditFinancials) {
+        input.clientType = clientType;
+        input.monthlyRent = monthlyRent;
+        input.paymentMonths = cycleMonthsEff;
+        input.discountValue = discountValue;
+        input.discountKind = discountKind;
+        input.discountScope = discountScope;
+      }
+      if (canEditIdentity) {
         if (clientId !== contract.clientId) input.clientId = clientId;
         if (officeNo && officeNo !== contract.officeNo) {
           input.floorKey = floorKey;
           input.officeNo = officeNo;
         }
-        input.clientType = clientType;
-        input.monthlyRent = monthlyRent;
         input.months = months;
         input.startDate = startDate;
-        input.discountValue = discountValue;
-        input.discountKind = discountKind;
-        input.discountScope = discountScope;
       }
       await onSave(input);
       toast.success("Contract updated");
@@ -134,13 +158,19 @@ export function EditContractDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {!canEditFinancials && (
+        {!canEditFinancials ? (
           <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-            This period is already <strong>paid</strong> — only the renewal
-            settings can be changed. To correct paid data, close the contract
-            and create it again (admin).
+            All invoices are <strong>paid</strong> — only the renewal settings
+            can be changed. To correct paid data, close the contract and create
+            it again (admin).
           </div>
-        )}
+        ) : hasPaidHistory ? (
+          <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+            This contract has <strong>paid periods</strong> — client, office,
+            start date and term are locked. Rent, discount and payment terms
+            can still be corrected (they update the current unpaid invoice).
+          </div>
+        ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-2">
@@ -149,7 +179,7 @@ export function EditContractDialog({
               value={clientId}
               onValueChange={(v) => setClientId(v ?? contract.clientId)}
             >
-              <SelectTrigger disabled={!canEditFinancials}>
+              <SelectTrigger disabled={!canEditIdentity}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -187,7 +217,7 @@ export function EditContractDialog({
               value={officeKey}
               onValueChange={(v) => setOfficeKey(v ?? officeKey)}
             >
-              <SelectTrigger disabled={!canEditFinancials}>
+              <SelectTrigger disabled={!canEditIdentity}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-72">
@@ -214,32 +244,74 @@ export function EditContractDialog({
           </div>
 
           <div className="space-y-1">
-            <Label>{isFirstPeriod ? "Contract period" : "Current period"}</Label>
+            <Label>Contract term (total)</Label>
+            <div className="flex gap-2">
+              <Select
+                value={customTerm ? "custom" : String(months)}
+                onValueChange={(v) => {
+                  if (v === "custom") {
+                    setCustomTerm(true);
+                    return;
+                  }
+                  setCustomTerm(false);
+                  setMonths(Number(v) || months);
+                }}
+              >
+                <SelectTrigger
+                  disabled={!canEditIdentity}
+                  className={customTerm ? "w-28" : "w-full"}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TERM_PRESETS.map((m) => (
+                    <SelectItem key={m} value={String(m)}>
+                      {m} months
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">Custom…</SelectItem>
+                </SelectContent>
+              </Select>
+              {customTerm && (
+                <Input
+                  type="number"
+                  min={1}
+                  className="w-24"
+                  value={months || ""}
+                  disabled={!canEditIdentity}
+                  onChange={(e) =>
+                    setMonths(Math.max(1, Number(e.target.value) || 1))
+                  }
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label>Payment terms</Label>
             <Select
-              value={String(months)}
-              onValueChange={(v) => setMonths(Number(v) || months)}
+              value={String(cycleMonthsEff)}
+              onValueChange={(v) => setPaymentMonths(Number(v) || paymentMonths)}
             >
               <SelectTrigger disabled={!canEditFinancials}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {[1, ...TERMS]
-                  .filter((m, i, a) => a.indexOf(m) === i)
-                  .map((m) => (
-                    <SelectItem key={m} value={String(m)}>
-                      {m} month{m > 1 ? "s" : ""}
-                    </SelectItem>
-                  ))}
+                {PAYMENT_PRESETS.map((m) => (
+                  <SelectItem key={m} value={String(m)}>
+                    Every {m} month{m > 1 ? "s" : ""} (in advance)
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-1">
-            <Label>{isFirstPeriod ? "Start date" : "Period start"}</Label>
+            <Label>Start date</Label>
             <Input
               type="date"
               value={startDate}
-              disabled={!canEditFinancials}
+              disabled={!canEditIdentity}
               onChange={(e) => setStartDate(e.target.value)}
             />
           </div>
@@ -334,12 +406,12 @@ export function EditContractDialog({
         {canEditFinancials && (
           <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm">
             <span className="text-muted-foreground">
-              {startDate} → {endDate}
+              Term {startDate} → {endDate} · pays every {cycleMonthsEff} mo
             </span>
             <span className="font-semibold">
-              Corrected invoice:{" "}
+              Corrected open invoice:{" "}
               <Badge variant="secondary" className="text-sm">
-                {total.toFixed(3)} BHD
+                {cycleAmount.toFixed(3)} BHD
               </Badge>
             </span>
           </div>

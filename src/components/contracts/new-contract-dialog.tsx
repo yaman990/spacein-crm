@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { addMonths } from "@/lib/format";
 import { rateForTerm } from "@/lib/office-contracts";
-import { periodAmount } from "@/types/contract";
+import { monthsBetween } from "@/lib/contract-checks";
+import { periodAmount, TERM_PRESETS, PAYMENT_PRESETS } from "@/types/contract";
 import type {
-  ContractTerm,
   DiscountKind,
   DiscountScope,
   EndAction,
@@ -32,8 +32,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-const TERMS: ContractTerm[] = [3, 6, 9, 12];
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -66,7 +64,9 @@ export function NewContractDialog({
 }) {
   const [clientId, setClientId] = useState("");
   const [clientType, setClientType] = useState<ClientType>("commercial");
-  const [months, setMonths] = useState<ContractTerm>(12);
+  const [months, setMonths] = useState<number>(12);
+  const [customTerm, setCustomTerm] = useState(false);
+  const [paymentMonths, setPaymentMonths] = useState<number>(3);
   const [monthlyRent, setMonthlyRent] = useState(0);
   const [rentTouched, setRentTouched] = useState(false);
   const [discountValue, setDiscountValue] = useState(0);
@@ -85,9 +85,41 @@ export function NewContractDialog({
 
   const officeRate = rateForTerm(details, months);
   const endDate = startDate ? addMonths(startDate, months) : "";
-  const total = periodAmount(monthlyRent, months, discountValue, discountKind);
+  // first payment cycle (clamped to the term end)
+  const cycleMonthsEff = Math.max(1, Math.min(paymentMonths, months));
+  let firstCycleEnd = startDate ? addMonths(startDate, cycleMonthsEff) : "";
+  if (endDate && firstCycleEnd > endDate) firstCycleEnd = endDate;
+  const firstCycleMonths =
+    startDate && firstCycleEnd
+      ? Math.max(1, monthsBetween(startDate, firstCycleEnd))
+      : cycleMonthsEff;
+  const cycleAmount = periodAmount(
+    monthlyRent,
+    firstCycleMonths,
+    discountValue,
+    discountKind,
+  );
+  // whole-term value across all cycles, applying the discount per its scope
+  const contractTotal = (() => {
+    const base = monthlyRent * months;
+    const numCycles = Math.max(1, Math.ceil(months / cycleMonthsEff));
+    let t: number;
+    if (discountKind === "percent") {
+      t =
+        discountScope === "every_period"
+          ? base * (1 - discountValue / 100)
+          : base - monthlyRent * firstCycleMonths * (discountValue / 100);
+    } else {
+      t =
+        base -
+        (discountScope === "every_period"
+          ? discountValue * numCycles
+          : discountValue);
+    }
+    return Math.max(0, Math.round(t * 1000) / 1000);
+  })();
 
-  function selectTerm(m: ContractTerm) {
+  function applyTerm(m: number) {
     setMonths(m);
     setRenewalMonths(m);
     const r = rateForTerm(details, m);
@@ -110,7 +142,8 @@ export function NewContractDialog({
         officeNo,
         clientType,
         monthlyRent: Number(monthlyRent) || 0,
-        months,
+        months: Math.max(1, Number(months) || 12),
+        paymentMonths: cycleMonthsEff,
         renewalMonths: Number(renewalMonths) || months,
         discountValue: Number(discountValue) || 0,
         discountKind,
@@ -210,18 +243,59 @@ export function NewContractDialog({
           </div>
 
           <div className="space-y-1">
-            <Label>Contract period</Label>
+            <Label>Contract term (total)</Label>
+            <div className="flex gap-2">
+              <Select
+                value={customTerm ? "custom" : String(months)}
+                onValueChange={(v) => {
+                  if (v === "custom") {
+                    setCustomTerm(true);
+                    return;
+                  }
+                  setCustomTerm(false);
+                  applyTerm(Number(v));
+                }}
+              >
+                <SelectTrigger className={customTerm ? "w-28" : "w-full"}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TERM_PRESETS.map((m) => (
+                    <SelectItem key={m} value={String(m)}>
+                      {m} months
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="custom">Custom…</SelectItem>
+                </SelectContent>
+              </Select>
+              {customTerm && (
+                <Input
+                  type="number"
+                  min={1}
+                  className="w-24"
+                  value={months || ""}
+                  placeholder="months"
+                  onChange={(e) =>
+                    applyTerm(Math.max(1, Number(e.target.value) || 1))
+                  }
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label>Payment terms</Label>
             <Select
-              value={String(months)}
-              onValueChange={(v) => selectTerm(Number(v) as ContractTerm)}
+              value={String(paymentMonths)}
+              onValueChange={(v) => setPaymentMonths(Number(v))}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TERMS.map((m) => (
+                {PAYMENT_PRESETS.map((m) => (
                   <SelectItem key={m} value={String(m)}>
-                    {m} months
+                    Every {m} month{m > 1 ? "s" : ""} (in advance)
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -334,16 +408,30 @@ export function NewContractDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm">
-          <span className="text-muted-foreground">
-            {startDate} → {endDate || "—"}
-          </span>
-          <span className="font-semibold">
-            Invoice total:{" "}
-            <Badge variant="secondary" className="text-sm">
-              {total.toFixed(3)} BHD
-            </Badge>
-          </span>
+        <div className="space-y-1 rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">
+              Term: {startDate} → {endDate || "—"} ({months} mo, pays every{" "}
+              {cycleMonthsEff} mo)
+            </span>
+            <span className="font-semibold">
+              Contract value:{" "}
+              <Badge variant="outline" className="text-sm">
+                {contractTotal.toFixed(3)} BHD
+              </Badge>
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">
+              First invoice: {startDate} → {firstCycleEnd || "—"} · due{" "}
+              {startDate} (in advance)
+            </span>
+            <span className="font-semibold">
+              <Badge variant="secondary" className="text-sm">
+                {cycleAmount.toFixed(3)} BHD
+              </Badge>
+            </span>
+          </div>
         </div>
 
         <DialogFooter>

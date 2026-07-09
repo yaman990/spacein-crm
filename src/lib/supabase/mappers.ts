@@ -164,6 +164,7 @@ export interface ContractRow {
   client_type: string;
   monthly_rent: number;
   months: number;
+  payment_months?: number | null;
   renewal_months: number;
   discount_value: number;
   discount_kind: string;
@@ -187,6 +188,7 @@ export function rowToContract(row: ContractRow): Contract {
     clientType: row.client_type as Contract["clientType"],
     monthlyRent: Number(row.monthly_rent ?? 0),
     months: Number(row.months ?? 0),
+    paymentMonths: Number(row.payment_months ?? row.months ?? 0),
     renewalMonths: Number(row.renewal_months ?? 0),
     discountValue: Number(row.discount_value ?? 0),
     discountKind: row.discount_kind as Contract["discountKind"],
@@ -213,6 +215,7 @@ export function contractToRow(
     client_type: c.clientType,
     monthly_rent: Number(c.monthlyRent ?? 0),
     months: Number(c.months ?? 0),
+    payment_months: Number(c.paymentMonths ?? c.months ?? 0),
     renewal_months: Number(c.renewalMonths ?? 0),
     discount_value: Number(c.discountValue ?? 0),
     discount_kind: c.discountKind,

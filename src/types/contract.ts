@@ -10,7 +10,13 @@ export type ContractStatus =
 export type EndAction = "auto_renew" | "terminate";
 export type DiscountKind = "fixed" | "percent";
 export type DiscountScope = "this_period" | "every_period";
-export type ContractTerm = 3 | 6 | 9 | 12;
+
+/** Contract term in months — presets are offered but any number is valid. */
+export type ContractTerm = number;
+/** Quick-pick contract terms (months); any custom number is also allowed. */
+export const TERM_PRESETS = [3, 6, 12, 24, 36] as const;
+/** Payment-cycle options: the client pays every N months, in advance. */
+export const PAYMENT_PRESETS = [1, 3, 6, 9, 12] as const;
 
 export interface Contract {
   id: string;
@@ -20,7 +26,10 @@ export interface Contract {
   officeNo?: string;
   clientType: ClientType;
   monthlyRent: number;
+  /** Total contract term in months (e.g. 24). */
   months: number;
+  /** Payment terms: one invoice every N months, paid in advance. */
+  paymentMonths: number;
   renewalMonths: number;
   discountValue: number;
   discountKind: DiscountKind;

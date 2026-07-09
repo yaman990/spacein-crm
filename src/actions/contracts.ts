@@ -9,9 +9,15 @@ import {
   invoiceToRow,
   officeDetailsToRow,
   rowToContract,
+  rowToInvoice,
 } from "@/lib/supabase/mappers";
 import { sendEmailViaResend } from "@/lib/email/resend";
-import { categorizeContracts, daysUntil } from "@/lib/contract-checks";
+import {
+  categorizeContracts,
+  daysUntil,
+  monthsBetween,
+  nextCycle,
+} from "@/lib/contract-checks";
 import type {
   Building,
   Contract,
@@ -56,7 +62,8 @@ async function syncClientBilling(
       rent_start: input.periodStart,
       rent_end: input.periodEnd,
       amount: input.amount,
-      due_date: input.periodEnd,
+      // rent is paid in advance: the invoice is due when its cycle starts
+      due_date: input.periodStart,
       status: "pending",
       paid_at: null,
     })
@@ -80,7 +87,10 @@ export interface CreateContractInput {
   officeNo?: string;
   clientType: ClientType;
   monthlyRent: number;
+  /** Total contract term in months (e.g. 24). */
   months: number;
+  /** Payment terms: one invoice every N months, paid in advance. */
+  paymentMonths?: number;
   renewalMonths?: number;
   discountValue?: number;
   discountKind?: DiscountKind;
@@ -90,8 +100,11 @@ export interface CreateContractInput {
 }
 
 /**
- * Creates a contract (status "reserved" — office locked, first invoice unpaid)
- * plus its first period invoice.
+ * Creates a contract (status "reserved" — office locked until paid) and
+ * issues the FIRST payment-cycle invoice only (e.g. a 24-month contract paid
+ * every 3 months starts with one 3-month invoice, due at the cycle start).
+ * Later cycles are issued by the "Run renewals & reminders" check ~30 days
+ * before each cycle begins.
  */
 export async function createContractAction(
   input: CreateContractInput,
@@ -103,6 +116,10 @@ export async function createContractAction(
   const discountKind = input.discountKind ?? "fixed";
   const startDate = input.startDate;
   const endDate = addMonths(startDate, input.months);
+  const paymentMonths = Math.max(
+    1,
+    Math.min(input.paymentMonths || input.months, input.months),
+  );
   const now = new Date().toISOString();
 
   const contract: Contract = {
@@ -114,6 +131,7 @@ export async function createContractAction(
     clientType: input.clientType,
     monthlyRent: input.monthlyRent,
     months: input.months,
+    paymentMonths,
     renewalMonths: input.renewalMonths || input.months,
     discountValue,
     discountKind,
@@ -132,14 +150,19 @@ export async function createContractAction(
     .insert(contractToRow(contract));
   if (error) throw new Error(error.message);
 
+  // first payment cycle (clamped to the term end); discount always applies
+  // to the first cycle regardless of scope
+  let firstEnd = addMonths(startDate, paymentMonths);
+  if (firstEnd > endDate) firstEnd = endDate;
+  const firstMonths = Math.max(1, monthsBetween(startDate, firstEnd));
   const invoice: Invoice = {
     id: uid(),
     contractId: contract.id,
     periodStart: startDate,
-    periodEnd: endDate,
+    periodEnd: firstEnd,
     amount: periodAmount(
       input.monthlyRent,
-      input.months,
+      firstMonths,
       discountValue,
       discountKind,
     ),
@@ -161,9 +184,9 @@ export async function createContractAction(
   await syncClientBilling(supabase, {
     clientId: input.clientId,
     monthlyRent: input.monthlyRent,
-    months: input.months,
+    months: firstMonths,
     periodStart: startDate,
-    periodEnd: endDate,
+    periodEnd: firstEnd,
     amount: invoice.amount,
   });
 
@@ -177,7 +200,10 @@ export interface UpdateContractInput {
   officeNo?: string;
   clientType?: ClientType;
   monthlyRent?: number;
+  /** Total contract term in months. */
   months?: number;
+  /** Payment terms: one invoice every N months. */
+  paymentMonths?: number;
   startDate?: string;
   discountValue?: number;
   discountKind?: DiscountKind;
@@ -189,12 +215,14 @@ export interface UpdateContractInput {
 /**
  * Corrects a contract (staff who created it, or an admin).
  *
- * - While the current period's invoice is UNPAID: everything can be corrected
- *   (client, office, rent, term, start date, discount, renewal settings) and
- *   the open invoice is regenerated with the corrected period/amount.
- * - Once the period is PAID: only forward-looking settings (end action and
- *   renewal period) can change — paid amounts are never silently rewritten;
- *   for those cases close the contract and recreate it.
+ * - Renewal settings (end action, renewal period) are editable anytime.
+ * - While NOTHING is paid yet: everything can be corrected (client, office,
+ *   rent, term, payment terms, start date, discount) and the open first-cycle
+ *   invoice is regenerated.
+ * - Once some cycle is PAID: rent / discount / payment terms can still change
+ *   (they regenerate the current OPEN cycle invoice and apply to future
+ *   cycles), but client / office / start date / term cannot — paid history is
+ *   never rewritten; for those cases close the contract and recreate it.
  */
 export async function updateContractAction(
   input: UpdateContractInput,
@@ -218,35 +246,36 @@ export async function updateContractAction(
   }
   if (row.status === "closed") throw new Error("This contract is closed");
 
-  // the open (unpaid) invoice of the current period, if any
-  const { data: invoices } = await supabase
+  const { data: contractInvoices } = await supabase
     .from("invoices")
     .select("*")
     .eq("contract_id", input.contractId)
-    .eq("status", "issued")
-    .order("period_end", { ascending: false })
-    .limit(1);
-  const openInvoice = invoices?.[0];
+    .order("period_end", { ascending: false });
+  const openInvoice = (contractInvoices ?? []).find(
+    (i) => i.status === "issued",
+  );
+  const hasPaid = (contractInvoices ?? []).some((i) => i.status === "paid");
 
-  const financialKeys = [
-    "clientId",
-    "floorKey",
-    "officeNo",
-    "clientType",
+  const identityKeys = ["clientId", "officeNo", "startDate", "months"] as const;
+  const wantsIdentityEdit = identityKeys.some((k) => input[k] !== undefined);
+  const cycleKeys = [
     "monthlyRent",
-    "months",
-    "startDate",
+    "paymentMonths",
     "discountValue",
     "discountKind",
     "discountScope",
+    "clientType",
   ] as const;
-  const wantsFinancialEdit = financialKeys.some(
-    (k) => input[k] !== undefined,
-  );
+  const wantsCycleEdit = cycleKeys.some((k) => input[k] !== undefined);
 
-  if (!openInvoice && wantsFinancialEdit) {
+  if (wantsIdentityEdit && hasPaid) {
     throw new Error(
-      "This period is already paid — only the renewal settings can be changed. To fix paid data, close the contract and create it again.",
+      "This contract already has paid periods — client, office, start date and term can't be changed. Close it and create a corrected contract instead.",
+    );
+  }
+  if ((wantsIdentityEdit || wantsCycleEdit) && !openInvoice) {
+    throw new Error(
+      "All invoices are paid — only the renewal settings can be changed until the next cycle is issued.",
     );
   }
 
@@ -265,30 +294,24 @@ export async function updateContractAction(
     changes.push(`renewal period → ${input.renewalMonths} mo`);
   }
 
-  if (openInvoice && wantsFinancialEdit) {
-    const isFirstPeriod = Number(row.renewal_count) === 0;
+  if (openInvoice && (wantsIdentityEdit || wantsCycleEdit)) {
     const monthlyRent = input.monthlyRent ?? Number(row.monthly_rent);
-    const months =
-      input.months ??
-      Number(isFirstPeriod ? row.months : row.renewal_months) ??
-      12;
-    const periodStart =
-      input.startDate ?? (openInvoice.period_start as string);
-    const periodEnd = addMonths(periodStart, months);
+    const termMonths = input.months ?? (Number(row.months) || 12);
+    const paymentMonths = Math.max(
+      1,
+      Math.min(
+        input.paymentMonths ??
+          (Number(row.payment_months) || Number(row.months) || 12),
+        termMonths,
+      ),
+    );
     const discountValue = input.discountValue ?? Number(row.discount_value);
     const discountKind =
       input.discountKind ?? (row.discount_kind as DiscountKind);
     const discountScope =
       input.discountScope ?? (row.discount_scope as DiscountScope);
-    const discountApplies =
-      isFirstPeriod || discountScope === "every_period" ? discountValue : 0;
-    const amount = periodAmount(
-      monthlyRent,
-      months,
-      discountApplies,
-      discountKind,
-    );
 
+    // contract-level fields
     if (input.clientId && input.clientId !== row.client_id) {
       patch.client_id = input.clientId;
       changes.push("client changed");
@@ -303,31 +326,48 @@ export async function updateContractAction(
       patch.monthly_rent = monthlyRent;
       changes.push(`rent → ${monthlyRent}/mo`);
     }
+    if (paymentMonths !== (Number(row.payment_months) || Number(row.months))) {
+      patch.payment_months = paymentMonths;
+      changes.push(`payment terms → every ${paymentMonths} mo`);
+    }
     patch.discount_value = discountValue;
     patch.discount_kind = discountKind;
     patch.discount_scope = discountScope;
-    if (isFirstPeriod) {
-      patch.months = months;
-      patch.start_date = periodStart;
-    } else {
-      patch.renewal_months = input.renewalMonths ?? months;
+
+    // period geometry of the OPEN cycle being regenerated
+    const isFreshContract = !hasPaid && Number(row.renewal_count) === 0;
+    let contractStart = row.start_date as string;
+    let contractEnd = row.end_date as string;
+    let cycleStart = openInvoice.period_start as string;
+    if (isFreshContract) {
+      contractStart = input.startDate ?? contractStart;
+      contractEnd = addMonths(contractStart, termMonths);
+      cycleStart = contractStart;
+      patch.months = termMonths;
+      patch.start_date = contractStart;
+      patch.end_date = contractEnd;
+      if (termMonths !== Number(row.months))
+        changes.push(`term → ${termMonths} mo`);
+      if (contractStart !== row.start_date)
+        changes.push(`start → ${contractStart}`);
     }
-    patch.end_date = periodEnd;
-    if (
-      months !==
-      Number(isFirstPeriod ? row.months : row.renewal_months)
-    ) {
-      changes.push(`term → ${months} mo`);
-    }
-    if (periodStart !== openInvoice.period_start) {
-      changes.push(`start → ${periodStart}`);
-    }
+    let cycleEnd = addMonths(cycleStart, paymentMonths);
+    if (cycleEnd > contractEnd) cycleEnd = contractEnd;
+    const cycleMonths = Math.max(1, monthsBetween(cycleStart, cycleEnd));
+    const discountApplies =
+      isFreshContract || discountScope === "every_period" ? discountValue : 0;
+    const amount = periodAmount(
+      monthlyRent,
+      cycleMonths,
+      discountApplies,
+      discountKind,
+    );
 
     const { error: iErr } = await supabase
       .from("invoices")
       .update({
-        period_start: periodStart,
-        period_end: periodEnd,
+        period_start: cycleStart,
+        period_end: cycleEnd,
         amount,
       })
       .eq("id", openInvoice.id);
@@ -337,9 +377,9 @@ export async function updateContractAction(
     await syncClientBilling(supabase, {
       clientId: targetClient,
       monthlyRent,
-      months,
-      periodStart,
-      periodEnd,
+      months: cycleMonths,
+      periodStart: cycleStart,
+      periodEnd: cycleEnd,
       amount,
     });
     if (patch.office_no || patch.client_type) {
@@ -374,7 +414,10 @@ export async function updateContractAction(
   }
 }
 
-/** Renew a contract: extend to the next period + issue its (unpaid) invoice. */
+/**
+ * Renew a contract: extend the TERM by the renewal period and issue the first
+ * payment-cycle invoice of the renewal (later cycles come via Run checks).
+ */
 export async function renewContractAction(contractId: string): Promise<void> {
   await requireSession();
   const supabase = createAdminClient();
@@ -386,24 +429,33 @@ export async function renewContractAction(contractId: string): Promise<void> {
     .single();
   if (error || !row) throw new Error("Contract not found");
 
-  const months = Number(row.renewal_months) || Number(row.months) || 12;
-  const periodStart = row.end_date as string;
-  const periodEnd = addMonths(periodStart, months);
-  const discount =
-    row.discount_scope === "every_period" ? Number(row.discount_value) || 0 : 0;
-  const amount = periodAmount(
-    Number(row.monthly_rent) || 0,
-    months,
-    discount,
-    (row.discount_kind as "fixed" | "percent") ?? "fixed",
+  const renewalMonths =
+    Number(row.renewal_months) || Number(row.months) || 12;
+  const oldEnd = row.end_date as string;
+  const newEnd = addMonths(oldEnd, renewalMonths);
+
+  const cycle = nextCycle(
+    {
+      endDate: newEnd,
+      paymentMonths: Number(row.payment_months) || renewalMonths,
+      months: renewalMonths,
+      monthlyRent: Number(row.monthly_rent) || 0,
+      discountValue: Number(row.discount_value) || 0,
+      discountKind: (row.discount_kind as "fixed" | "percent") ?? "fixed",
+      discountScope:
+        (row.discount_scope as "this_period" | "every_period") ??
+        "this_period",
+    },
+    oldEnd,
   );
+  if (!cycle) throw new Error("Nothing to renew");
 
   const invoice: Invoice = {
     id: uid(),
     contractId,
-    periodStart,
-    periodEnd,
-    amount,
+    periodStart: cycle.periodStart,
+    periodEnd: cycle.periodEnd,
+    amount: cycle.amount,
     status: "issued",
     issuedAt: new Date().toISOString(),
   };
@@ -415,7 +467,7 @@ export async function renewContractAction(contractId: string): Promise<void> {
   const { error: cErr } = await supabase
     .from("contracts")
     .update({
-      end_date: periodEnd,
+      end_date: newEnd,
       status: "renewal_await_payment",
       renewal_count: (Number(row.renewal_count) || 0) + 1,
     })
@@ -425,10 +477,10 @@ export async function renewContractAction(contractId: string): Promise<void> {
   await syncClientBilling(supabase, {
     clientId: row.client_id as string,
     monthlyRent: Number(row.monthly_rent) || 0,
-    months,
-    periodStart,
-    periodEnd,
-    amount,
+    months: cycle.months,
+    periodStart: cycle.periodStart,
+    periodEnd: cycle.periodEnd,
+    amount: cycle.amount,
   });
 }
 
@@ -534,6 +586,7 @@ export interface ChecksSummary {
   renewed: number;
   expired: number;
   reminded: number;
+  cyclesInvoiced: number;
   emailsSent: number;
   emailErrors: number;
   details: string[];
@@ -552,8 +605,9 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
   const today = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();
 
-  const [cRes, clRes, stRes, setRes] = await Promise.all([
+  const [cRes, iRes, clRes, stRes, setRes] = await Promise.all([
     supabase.from("contracts").select("*"),
+    supabase.from("invoices").select("*"),
     supabase.from("clients").select("id, name, company, email"),
     supabase.from("crm_users").select("id, name, email"),
     supabase
@@ -563,6 +617,7 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
   ]);
 
   const contracts = (cRes.data ?? []).map(rowToContract);
+  const allInvoices = (iRes.data ?? []).map(rowToInvoice);
   const clientById = new Map(
     (clRes.data ?? []).map((c) => [c.id as string, c]),
   );
@@ -577,6 +632,7 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
     renewed: 0,
     expired: 0,
     reminded: 0,
+    cyclesInvoiced: 0,
     emailsSent: 0,
     emailErrors: 0,
     details: [],
@@ -597,18 +653,18 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
   };
 
   for (const c of dueRenewal) {
-    const months = c.renewalMonths || c.months || 12;
-    const periodStart = c.endDate;
-    const periodEnd = addMonths(periodStart, months);
-    const discount = c.discountScope === "every_period" ? c.discountValue : 0;
-    const amount = periodAmount(c.monthlyRent, months, discount, c.discountKind);
+    const renewalMonths = c.renewalMonths || c.months || 12;
+    const newEnd = addMonths(c.endDate, renewalMonths);
+    // issue only the FIRST payment cycle of the renewal
+    const cycle = nextCycle({ ...c, endDate: newEnd }, c.endDate);
+    if (!cycle) continue;
     await supabase.from("invoices").insert(
       invoiceToRow({
         id: uid(),
         contractId: c.id,
-        periodStart,
-        periodEnd,
-        amount,
+        periodStart: cycle.periodStart,
+        periodEnd: cycle.periodEnd,
+        amount: cycle.amount,
         status: "issued",
         issuedAt: now,
       }),
@@ -616,7 +672,7 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
     await supabase
       .from("contracts")
       .update({
-        end_date: periodEnd,
+        end_date: newEnd,
         status: "renewal_await_payment",
         renewal_count: c.renewalCount + 1,
       })
@@ -624,10 +680,10 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
     await syncClientBilling(supabase, {
       clientId: c.clientId,
       monthlyRent: c.monthlyRent,
-      months,
-      periodStart,
-      periodEnd,
-      amount,
+      months: cycle.months,
+      periodStart: cycle.periodStart,
+      periodEnd: cycle.periodEnd,
+      amount: cycle.amount,
     });
     delete reminders[c.id];
     summary.renewed++;
@@ -636,14 +692,65 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
     await send(
       cl?.email,
       `Contract ${c.contractNo} renewed — payment required`,
-      `Dear ${nameOf(c.clientId)},\n\nYour office contract ${c.contractNo} (Office ${c.officeNo}) has been renewed for ${months} month(s): ${periodStart} to ${periodEnd}.\n\nInvoice amount: ${amount.toFixed(3)} BHD. Please complete payment and send the transfer receipt so we can activate the renewal.\n\nSpace IN Business Center`,
+      `Dear ${nameOf(c.clientId)},\n\nYour office contract ${c.contractNo} (Office ${c.officeNo}) has been renewed for ${renewalMonths} month(s), until ${newEnd}.\n\nThe first payment cycle (${cycle.periodStart} to ${cycle.periodEnd}) is ${cycle.amount.toFixed(3)} BHD, due in advance on ${cycle.periodStart}. Please complete payment and send the transfer receipt so we can activate the renewal.\n\nSpace IN Business Center`,
     );
     await send(
       st?.email,
       `Contract ${c.contractNo} auto-renewed (awaiting payment)`,
-      `Contract ${c.contractNo} for ${nameOf(c.clientId)} (Office ${c.officeNo}) auto-renewed: ${periodStart} to ${periodEnd}, ${amount.toFixed(3)} BHD. Awaiting receipt/payment.`,
+      `Contract ${c.contractNo} for ${nameOf(c.clientId)} (Office ${c.officeNo}) auto-renewed until ${newEnd}. First cycle ${cycle.periodStart} → ${cycle.periodEnd}, ${cycle.amount.toFixed(3)} BHD. Awaiting receipt/payment.`,
     );
     summary.details.push(`Renewed ${c.contractNo} (Office ${c.officeNo})`);
+  }
+
+  // Payment cycles: issue the next cycle invoice ~30 days before it starts,
+  // for active contracts whose term still has uninvoiced cycles.
+  const latestEndByContract = new Map<string, string>();
+  for (const inv of allInvoices) {
+    const prev = latestEndByContract.get(inv.contractId);
+    if (!prev || inv.periodEnd > prev)
+      latestEndByContract.set(inv.contractId, inv.periodEnd);
+  }
+  for (const c of contracts) {
+    if (c.status !== "active") continue;
+    const lastEnd = latestEndByContract.get(c.id) ?? c.startDate;
+    const cycle = nextCycle(c, lastEnd);
+    if (!cycle) continue; // term fully invoiced
+    if (daysUntil(cycle.periodStart, today) > 30) continue; // not due yet
+    await supabase.from("invoices").insert(
+      invoiceToRow({
+        id: uid(),
+        contractId: c.id,
+        periodStart: cycle.periodStart,
+        periodEnd: cycle.periodEnd,
+        amount: cycle.amount,
+        status: "issued",
+        issuedAt: now,
+      }),
+    );
+    await syncClientBilling(supabase, {
+      clientId: c.clientId,
+      monthlyRent: c.monthlyRent,
+      months: cycle.months,
+      periodStart: cycle.periodStart,
+      periodEnd: cycle.periodEnd,
+      amount: cycle.amount,
+    });
+    summary.cyclesInvoiced++;
+    const cl = clientById.get(c.clientId);
+    const st = c.createdByStaffId ? staffById.get(c.createdByStaffId) : undefined;
+    await send(
+      cl?.email,
+      `Invoice for Office ${c.officeNo} — next rent period`,
+      `Dear ${nameOf(c.clientId)},\n\nYour next rent period for Office ${c.officeNo} (contract ${c.contractNo}) runs ${cycle.periodStart} to ${cycle.periodEnd}.\n\nAmount: ${cycle.amount.toFixed(3)} BHD, payable in advance by ${cycle.periodStart}. Kindly arrange the transfer and send us the receipt.\n\nSpace IN Business Center`,
+    );
+    await send(
+      st?.email,
+      `Cycle invoice issued — ${c.contractNo} (Office ${c.officeNo})`,
+      `Next payment cycle invoiced for ${nameOf(c.clientId)}: ${cycle.periodStart} → ${cycle.periodEnd}, ${cycle.amount.toFixed(3)} BHD, due ${cycle.periodStart}.`,
+    );
+    summary.details.push(
+      `Cycle invoiced ${c.contractNo} (${cycle.periodStart} → ${cycle.periodEnd})`,
+    );
   }
 
   for (const c of dueExpiry) {
