@@ -3,11 +3,13 @@
 import { useMemo } from "react";
 import { useClients, useContracts } from "@/providers/crm-provider";
 import { statusOf } from "@/lib/client-status";
+import { crRegistryState } from "@/lib/cr-registry";
 import { categorizeContracts, daysUntil } from "@/lib/contract-checks";
 import { bhd, fmtDate } from "@/lib/format";
-import { AlertTriangle, Clock, FileWarning, Receipt } from "lucide-react";
+import { AlertTriangle, Clock, FileWarning, Receipt, ScrollText } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { ClientRowActions } from "@/components/clients/client-row-actions";
+import { CrStatusBadge } from "@/components/clients/cr-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,6 +34,24 @@ export default function AlertsPage() {
       return d >= now && d <= soon;
     });
     return { overdue: ov, dueSoon: ds };
+  }, [clients]);
+
+  const crAlerts = useMemo(() => {
+    const rank = { inactive: 0, expired: 1, expiring: 2 } as const;
+    return clients
+      .map((c) => ({ client: c, state: crRegistryState(c) }))
+      .filter(
+        (x): x is { client: Client; state: ReturnType<typeof crRegistryState> } =>
+          x.state.level === "inactive" ||
+          x.state.level === "expired" ||
+          x.state.level === "expiring",
+      )
+      .sort(
+        (a, b) =>
+          rank[a.state.level as keyof typeof rank] -
+            rank[b.state.level as keyof typeof rank] ||
+          (a.state.days ?? 0) - (b.state.days ?? 0),
+      );
   }, [clients]);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -66,7 +86,8 @@ export default function AlertsPage() {
   if (
     overdue.length === 0 &&
     dueSoon.length === 0 &&
-    contractAlertCount === 0
+    contractAlertCount === 0 &&
+    crAlerts.length === 0
   ) {
     return (
       <div className="space-y-4">
@@ -76,8 +97,8 @@ export default function AlertsPage() {
         />
         <Card>
           <CardContent className="py-16 text-center text-muted-foreground">
-            All clear — no overdue payments, expiring contracts or pending
-            renewals.
+            All clear — no overdue payments, expiring contracts, pending
+            renewals or CR issues.
           </CardContent>
         </Card>
       </div>
@@ -142,7 +163,80 @@ export default function AlertsPage() {
           ))}
         </section>
       )}
+
+      {crAlerts.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">
+            Commercial registrations
+          </h2>
+          {crAlerts.map(({ client, state }) => (
+            <CrAlertCard key={client.id} client={client} state={state} />
+          ))}
+        </section>
+      )}
     </div>
+  );
+}
+
+function CrAlertCard({
+  client,
+  state,
+}: {
+  client: Client;
+  state: ReturnType<typeof crRegistryState>;
+}) {
+  const critical = state.level === "inactive" || state.level === "expired";
+  const text =
+    state.level === "inactive"
+      ? `Registry status: ${state.label}${
+          client.crExpiry ? ` — CR dated ${fmtDate(client.crExpiry)}` : ""
+        }`
+      : state.level === "expired"
+        ? `CR expired ${client.crExpiry ? fmtDate(client.crExpiry) : ""} — renew before signing or invoicing`
+        : `CR expires ${client.crExpiry ? fmtDate(client.crExpiry) : ""}${
+            state.days != null ? ` — in ${state.days} day${state.days === 1 ? "" : "s"}` : ""
+          }`;
+
+  return (
+    <Card
+      className={
+        critical
+          ? "border-destructive/20 bg-destructive/5"
+          : "border-border bg-muted/30"
+      }
+    >
+      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 items-start gap-4">
+          <div
+            className={`flex size-10 shrink-0 items-center justify-center rounded-lg ${
+              critical
+                ? "bg-destructive/10 text-destructive"
+                : "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+            }`}
+          >
+            <ScrollText className="size-5" aria-hidden />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold">
+              {client.company || client.name}
+              {client.rank && (
+                <Badge
+                  variant="outline"
+                  className="ml-2 font-mono text-[0.65rem]"
+                >
+                  CR {client.rank}
+                </Badge>
+              )}
+              <CrStatusBadge client={client} className="ml-1" />
+            </p>
+            <p className="text-sm text-muted-foreground">{text}</p>
+          </div>
+        </div>
+        <div className="shrink-0 self-end sm:self-center">
+          <ClientRowActions client={client} />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
