@@ -458,6 +458,9 @@ export function buildClientFromForm(values: {
   name: string;
   company: string;
   type: ClientType;
+  authorizedName: string;
+  authorizedCpr: string;
+  authorizedNationality: string;
   phone: string;
   email: string;
   rank: string;
@@ -471,6 +474,9 @@ export function buildClientFromForm(values: {
     name: values.name.trim(),
     company: values.company.trim(),
     type: values.type,
+    authorizedName: values.authorizedName.trim(),
+    authorizedCpr: values.authorizedCpr.trim(),
+    authorizedNationality: values.authorizedNationality.trim(),
     phone: values.phone.trim(),
     email: values.email.trim(),
     rank: values.rank.trim(),

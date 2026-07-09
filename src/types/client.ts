@@ -5,8 +5,13 @@ export type ClientType = "individual" | "commercial";
 export interface Client {
   id: string;
   name: string;
+  /** For commercial clients this is the registered CR name. */
   company: string;
   type?: ClientType;
+  /** Authorized signatory — signs contracts on behalf of the CR. */
+  authorizedName?: string;
+  authorizedCpr?: string;
+  authorizedNationality?: string;
   rank: string;
   office: string;
   phone: string;

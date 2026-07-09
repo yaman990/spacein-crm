@@ -100,13 +100,29 @@ export function buildContractDocument(
 
   <div class="preamble">
     <p><b>Name of the lessor / First Party:</b> SPACE IN BUSINESS CENTER W.L.L. — CR. No. 165431-1 — Contact No. 33246663 — E-mail: Spacein.bh@gmail.com.</p>
-    <p><b>Name of the Tenant / Second Party:</b> ${esc(client.company || client.name)}${
-      contract.clientType === "commercial" && client.rank
-        ? ` — CR. No. ${esc(client.rank)}`
-        : ""
-    }. Responsible person: Mr./Ms. ${esc(client.name)}${
-      client.email ? ` — E-Mail: ${esc(client.email)}` : ""
-    }${client.phone ? ` — Contact No. ${esc(client.phone)}` : ""}.</p>
+    ${
+      contract.clientType === "commercial"
+        ? `<p><b>Name of the Tenant / Second Party:</b> ${esc(
+            client.company || client.name,
+          )}${client.rank ? ` — CR. No. ${esc(client.rank)}` : ""}, and the jointly responsible person with the company Mr./Ms. ${esc(
+            client.authorizedName || client.name,
+          )}${
+            client.authorizedNationality
+              ? ` – ${esc(client.authorizedNationality)} National`
+              : ""
+          }${
+            client.authorizedCpr
+              ? `, holding CPR No. ${esc(client.authorizedCpr)}`
+              : ""
+          }${client.email ? ` — E-Mail: ${esc(client.email)}` : ""}${
+            client.phone ? ` — Contact No. ${esc(client.phone)}` : ""
+          }.</p>`
+        : `<p><b>Name of the Tenant / Second Party:</b> Mr./Ms. ${esc(
+            client.name,
+          )}${client.email ? ` — E-Mail: ${esc(client.email)}` : ""}${
+            client.phone ? ` — Contact No. ${esc(client.phone)}` : ""
+          }.</p>`
+    }
     <p><b>Leased Address:</b> ${addr}</p>
     <p><b>Term of the Contract:</b> ${esc(contract.months)} months, starting from ${esc(
       fmtDate(contract.startDate),
@@ -121,7 +137,16 @@ export function buildContractDocument(
 
   <div class="sig">
     <div>Signature of the First Party</div>
-    <div>Signature of the Second Party</div>
+    <div>
+      Signature of the Second Party${
+        contract.clientType === "commercial" &&
+        (client.authorizedName || client.name)
+          ? `<div style="font-weight:normal;font-size:10px;margin-top:4px;">${esc(
+              client.authorizedName || client.name,
+            )} — Authorized signatory</div>`
+          : ""
+      }
+    </div>
   </div>
 </body></html>`;
 }

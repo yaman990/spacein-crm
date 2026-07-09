@@ -36,6 +36,9 @@ const schema = z.object({
   name: z.string().min(1, "Name is required"),
   company: z.string(),
   type: z.enum(["individual", "commercial"]),
+  authorizedName: z.string(),
+  authorizedCpr: z.string(),
+  authorizedNationality: z.string(),
   phone: z.string(),
   email: z.string(),
   rank: z.string(),
@@ -52,6 +55,9 @@ const emptyForm = (): FormState => ({
   name: "",
   company: "",
   type: "commercial",
+  authorizedName: "",
+  authorizedCpr: "",
+  authorizedNationality: "",
   phone: "",
   email: "",
   rank: "",
@@ -67,6 +73,9 @@ function clientToForm(client: Client): FormState {
     name: client.name,
     company: client.company,
     type: client.type ?? "commercial",
+    authorizedName: client.authorizedName ?? "",
+    authorizedCpr: client.authorizedCpr ?? "",
+    authorizedNationality: client.authorizedNationality ?? "",
     phone: client.phone,
     email: client.email,
     rank: client.rank,
@@ -111,6 +120,10 @@ export function ClientFormDialog({
       toast.error(parsed.error.issues[0]?.message ?? "Invalid form");
       return;
     }
+    if (parsed.data.type === "commercial" && !parsed.data.company.trim()) {
+      toast.error("CR Name is required for commercial clients");
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -122,6 +135,9 @@ export function ClientFormDialog({
           name: v.name.trim(),
           company: v.company.trim(),
           type: v.type,
+          authorizedName: v.authorizedName.trim(),
+          authorizedCpr: v.authorizedCpr.trim(),
+          authorizedNationality: v.authorizedNationality.trim(),
           phone: v.phone.trim(),
           email: v.email.trim(),
           rank: v.rank.trim(),
@@ -161,17 +177,28 @@ export function ClientFormDialog({
             onSubmit={handleSubmit}
             className="grid gap-4 sm:grid-cols-2"
           >
-            <Field label="Full Name *">
+            <Field label="Full Name (contact person) *">
               <Input
                 value={form.name}
                 onChange={(e) => set("name", e.target.value)}
                 placeholder="Ahmed Al Mansouri"
               />
             </Field>
-            <Field label="Company">
+            <Field
+              label={
+                form.type === "commercial"
+                  ? "CR Name (registered company) *"
+                  : "Company (optional)"
+              }
+            >
               <Input
                 value={form.company}
                 onChange={(e) => set("company", e.target.value)}
+                placeholder={
+                  form.type === "commercial"
+                    ? "As written on the Commercial Registration"
+                    : ""
+                }
               />
             </Field>
             <Field label="Type">
@@ -216,6 +243,37 @@ export function ClientFormDialog({
                 onChange={(e) => set("crExpiry", e.target.value)}
               />
             </Field>
+            {form.type === "commercial" && (
+              <div className="col-span-2 space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Authorized signatory — signs the contract on behalf of the CR
+                </p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <Field label="Name">
+                    <Input
+                      value={form.authorizedName}
+                      onChange={(e) => set("authorizedName", e.target.value)}
+                      placeholder="e.g. Bilal Mohamed Adem"
+                    />
+                  </Field>
+                  <Field label="CPR No.">
+                    <Input
+                      value={form.authorizedCpr}
+                      onChange={(e) => set("authorizedCpr", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Nationality">
+                    <Input
+                      value={form.authorizedNationality}
+                      onChange={(e) =>
+                        set("authorizedNationality", e.target.value)
+                      }
+                      placeholder="e.g. Bahraini"
+                    />
+                  </Field>
+                </div>
+              </div>
+            )}
             <Field label="Join Date">
               <Input
                 type="date"
