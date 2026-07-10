@@ -371,15 +371,16 @@ export default function OfficesPage() {
   }
 
   /**
-   * Click an office: restricted → edit; empty → new contract; occupied → the
-   * contract detail (mark paid, view receipt, add tenant if a slot is free).
+   * Click an office: occupied → contract detail (even if the office is also
+   * restricted, so its live contracts stay reachable); empty & restricted →
+   * edit; empty → new contract.
    */
   function selectOffice(officeNo: string) {
     const occ = occupancyByNo.get(officeNo);
     if (!occ) return;
-    if (occ.status === "restricted") openEdit(activeFloor, officeNo);
-    else if (occ.used === 0) setNewContractTarget({ floorKey: activeFloor, officeNo });
-    else setDetailOfficeNo(officeNo);
+    if (occ.used > 0) setDetailOfficeNo(officeNo);
+    else if (occ.status === "restricted") openEdit(activeFloor, officeNo);
+    else setNewContractTarget({ floorKey: activeFloor, officeNo });
   }
 
   async function handleSaveEdit(input: {

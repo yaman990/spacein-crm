@@ -126,8 +126,10 @@ export function contractOfficeStats(
           detailsByKey,
           legacyStatus,
         );
-        if (occ.status === "restricted") restricted++;
-        else if (occ.used > 0 || occ.status === "legacy") rented++;
+        // A revenue-bearing office counts as rented even if it's also flagged
+        // restricted — only an empty restricted office is "restricted".
+        if (occ.used > 0 || occ.status === "legacy") rented++;
+        else if (occ.status === "restricted") restricted++;
         else free++;
       }),
     ),

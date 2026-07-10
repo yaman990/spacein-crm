@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { addMonths } from "@/lib/format";
+import { addMonths, bhd } from "@/lib/format";
 import { rateForTerm } from "@/lib/office-contracts";
 import { monthsBetween } from "@/lib/contract-checks";
 import { periodAmount, TERM_PRESETS, PAYMENT_PRESETS } from "@/types/contract";
@@ -368,6 +368,18 @@ export function NewContractDialog({
                 <SelectItem value="every_period">Every period</SelectItem>
               </SelectContent>
             </Select>
+            {discountKind === "fixed" &&
+              discountScope === "every_period" &&
+              discountValue > 0 && (
+                <p className="text-[0.7rem] text-amber-600 dark:text-amber-400">
+                  {bhd(discountValue)} comes off <strong>each</strong> cycle — about{" "}
+                  {bhd(
+                    discountValue *
+                      Math.max(1, Math.ceil(months / cycleMonthsEff)),
+                  )}{" "}
+                  across the whole term.
+                </p>
+              )}
           </div>
 
           <div className="space-y-1">
