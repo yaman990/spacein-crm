@@ -3,6 +3,9 @@
 import { createHmac } from "node:crypto";
 import { auth } from "@/lib/auth";
 import { crDateToIso, normalizeCrStatus } from "@/lib/cr-registry";
+import { uid } from "@/lib/format";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { rowToClient } from "@/lib/supabase/mappers";
 
 const SIJILAT_API_BASE = "https://api.sijilat.bh";
 const SIJILAT_PASSWORD_SECRET = "UHxNtYMRYwvfpO1dS5pWLKL0M2DgOj40EbN4SoBWgfc";
@@ -19,6 +22,15 @@ export interface CrLookupResult {
   registrationDate: string;
   expiry: string; // ISO yyyy-mm-dd
   status: string; // normalised English label
+}
+
+export interface CrBulkRefreshResult {
+  checked: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  failed: number;
+  failures: { crNumber: string; name: string; error: string }[];
 }
 
 interface SijilatTokenResponse {
@@ -136,33 +148,7 @@ function searchBody(crNumber: string) {
   };
 }
 
-function chooseRecord(records: SijilatRecord[], branchNumber: string) {
-  if (branchNumber) {
-    const exact = records.find((r) => String(r.BRANCH_NO ?? "") === branchNumber);
-    if (exact) return exact;
-  }
-
-  const active = records.filter(
-    (r) => normalizeCrStatus(r.STATUS).toLowerCase() === "active",
-  );
-
-  return (
-    active.find((r) => String(r.BRANCH_NO ?? "") === "1") ??
-    active[0] ??
-    records.find((r) => String(r.BRANCH_NO ?? "") === "1") ??
-    records[0]
-  );
-}
-
-export async function retrieveCrAction(
-  crInput: string,
-): Promise<CrLookupResult | null> {
-  const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-
-  const { crNumber, branchNumber } = parseCrInput(crInput);
-  if (!crNumber) throw new Error("Enter a CR number first.");
-
+async function fetchSijilatRecords(crNumber: string): Promise<SijilatRecord[]> {
   const token = await getSijilatToken();
   const res = await fetch(
     `${SIJILAT_API_BASE}/api/CRdetails/AdvanceSearchCR_Paging`,
@@ -189,19 +175,40 @@ export async function retrieveCrAction(
     throw new Error(message);
   }
 
-  const records =
-    data.jsonData &&
+  return data.jsonData &&
     typeof data.jsonData !== "string" &&
     Array.isArray(data.jsonData.CR_list)
-      ? data.jsonData.CR_list
-      : [];
-  const record = chooseRecord(records, branchNumber);
-  if (!record) return null;
+    ? data.jsonData.CR_list
+    : [];
+}
 
-  const selectedBranch = String(record.BRANCH_NO ?? branchNumber || "");
+function chooseRecord(records: SijilatRecord[], branchNumber: string) {
+  if (branchNumber) {
+    const exact = records.find((r) => String(r.BRANCH_NO ?? "") === branchNumber);
+    if (exact) return exact;
+  }
+
+  const active = records.filter(
+    (r) => normalizeCrStatus(r.STATUS).toLowerCase() === "active",
+  );
+
+  return (
+    active.find((r) => String(r.BRANCH_NO ?? "") === "1") ??
+    active[0] ??
+    records.find((r) => String(r.BRANCH_NO ?? "") === "1") ??
+    records[0]
+  );
+}
+
+function recordToResult(
+  record: SijilatRecord,
+  fallbackCrNumber: string,
+  fallbackBranchNumber: string,
+): CrLookupResult {
+  const selectedBranch = String(record.BRANCH_NO ?? fallbackBranchNumber || "");
 
   return {
-    crNumber: String(record.CR_NO ?? crNumber),
+    crNumber: String(record.CR_NO ?? fallbackCrNumber),
     branchNumber: selectedBranch,
     nameEnglish: String(record.CR_LNM ?? ""),
     nameArabic: String(record.CR_ANM ?? ""),
@@ -209,5 +216,109 @@ export async function retrieveCrAction(
     registrationDate: String(record.REG_DATE ?? ""),
     expiry: crDateToIso(String(record.EXPIRE_DATE ?? "")),
     status: normalizeCrStatus(String(record.STATUS ?? "")),
+  };
+}
+
+async function lookupCr(
+  crInput: string,
+  recordsCache = new Map<string, SijilatRecord[]>(),
+): Promise<CrLookupResult | null> {
+  const { crNumber, branchNumber } = parseCrInput(crInput);
+  if (!crNumber) throw new Error("Enter a CR number first.");
+
+  let records = recordsCache.get(crNumber);
+  if (!records) {
+    records = await fetchSijilatRecords(crNumber);
+    recordsCache.set(crNumber, records);
+  }
+
+  const record = chooseRecord(records, branchNumber);
+  return record ? recordToResult(record, crNumber, branchNumber) : null;
+}
+
+export async function retrieveCrAction(
+  crInput: string,
+): Promise<CrLookupResult | null> {
+  const session = await auth();
+  if (!session?.user) throw new Error("Unauthorized");
+  return lookupCr(crInput);
+}
+
+export async function refreshAllClientCrDataAction(): Promise<CrBulkRefreshResult> {
+  const session = await auth();
+  if (!session?.user) throw new Error("Unauthorized");
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.from("clients").select("*");
+  if (error) throw new Error(error.message);
+
+  const clients = (data ?? []).map(rowToClient);
+  const targets = clients.filter(
+    (client) =>
+      client.type !== "individual" && Boolean(parseCrInput(client.rank).crNumber),
+  );
+  const recordsCache = new Map<string, SijilatRecord[]>();
+  const failures: CrBulkRefreshResult["failures"] = [];
+  let updated = 0;
+  let unchanged = 0;
+
+  for (const client of targets) {
+    try {
+      const result = await lookupCr(client.rank, recordsCache);
+      if (!result) {
+        failures.push({
+          crNumber: client.rank,
+          name: client.company || client.name,
+          error: "No Sijilat record found",
+        });
+        continue;
+      }
+
+      const patch: { cr_expiry?: string | null; cr_status?: string | null } = {};
+      if (result.expiry && result.expiry !== (client.crExpiry ?? "")) {
+        patch.cr_expiry = result.expiry;
+      }
+      if (result.status && result.status !== (client.crStatus ?? "")) {
+        patch.cr_status = result.status;
+      }
+
+      if (Object.keys(patch).length === 0) {
+        unchanged++;
+        continue;
+      }
+
+      const { error: updateError } = await supabase
+        .from("clients")
+        .update(patch)
+        .eq("id", client.id);
+      if (updateError) throw new Error(updateError.message);
+
+      updated++;
+    } catch (err) {
+      failures.push({
+        crNumber: client.rank,
+        name: client.company || client.name,
+        error: err instanceof Error ? err.message : "Lookup failed",
+      });
+    }
+  }
+
+  await supabase.from("activity_log").insert({
+    id: uid(),
+    type: "created",
+    cid: null,
+    cname: "Sijilat",
+    description: `Live CR refresh checked ${targets.length} clients and updated ${updated}`,
+    amt: null,
+    ts: new Date().toISOString(),
+  });
+
+  return {
+    checked: targets.length,
+    updated,
+    unchanged,
+    skipped: clients.length - targets.length,
+    failed: failures.length,
+    failures: failures.slice(0, 20),
   };
 }
