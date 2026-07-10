@@ -661,7 +661,7 @@ async function applyPayment(
   const remaining = Math.round((total - already) * 1000) / 1000;
   if (remaining <= 0.0005) throw new Error("This invoice is already fully paid");
 
-  let amount =
+  const amount =
     requestedAmount == null ? remaining : Math.round(requestedAmount * 1000) / 1000;
   if (amount <= 0) throw new Error("Enter a payment amount greater than zero");
   if (amount > remaining + 0.0005)
