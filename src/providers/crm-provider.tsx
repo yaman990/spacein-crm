@@ -537,6 +537,7 @@ export function buildClientFromForm(values: {
   rentedBy: string;
   notes: string;
   crExpiry: string;
+  crStatus?: string;
 }): ClientInput {
   return {
     name: values.name.trim(),
@@ -557,6 +558,7 @@ export function buildClientFromForm(values: {
     rentedBy: values.rentedBy.trim(),
     notes: values.notes.trim(),
     crExpiry: values.crExpiry,
+    crStatus: values.crStatus,
   };
 }
 

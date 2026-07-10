@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { CrStatusBadge } from "@/components/clients/cr-status-badge";
+import { retrieveCrAction } from "@/actions/sijilat";
 
 // The client record holds identity data only. Everything financial (rent,
 // invoices, due dates, payment status) lives on the client's contracts and is
@@ -48,6 +49,7 @@ const schema = z.object({
   rentedBy: z.string(),
   notes: z.string(),
   crExpiry: z.string(),
+  crStatus: z.string(),
 });
 
 type FormState = z.infer<typeof schema>;
@@ -67,6 +69,7 @@ const emptyForm = (): FormState => ({
   rentedBy: "",
   notes: "",
   crExpiry: "",
+  crStatus: "",
 });
 
 function clientToForm(client: Client): FormState {
@@ -85,6 +88,7 @@ function clientToForm(client: Client): FormState {
     rentedBy: client.rentedBy,
     notes: client.notes,
     crExpiry: client.crExpiry ?? "",
+    crStatus: client.crStatus ?? "",
   };
 }
 
@@ -101,7 +105,34 @@ export function ClientFormDialog({
   const { updateClient } = useCrm();
   const [form, setForm] = useState<FormState>(emptyForm());
   const [submitting, setSubmitting] = useState(false);
+  const [retrieving, setRetrieving] = useState(false);
   const isEdit = !!client;
+
+  async function handleRetrieve() {
+    if (!form.rank.trim()) {
+      toast.error("Enter the CR number first");
+      return;
+    }
+    try {
+      setRetrieving(true);
+      const r = await retrieveCrAction(form.rank);
+      if (!r) {
+        toast.error("No commercial registration found for that number");
+        return;
+      }
+      setForm((prev) => ({
+        ...prev,
+        company: r.nameEnglish || prev.company,
+        crExpiry: r.expiry || prev.crExpiry,
+        crStatus: r.status || prev.crStatus,
+      }));
+      toast.success(`Loaded ${r.nameEnglish || r.crNumber} from Sijilat`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "CR lookup failed");
+    } finally {
+      setRetrieving(false);
+    }
+  }
 
   function handleOpenChange(next: boolean) {
     if (next) {
@@ -146,6 +177,7 @@ export function ClientFormDialog({
           rentedBy: v.rentedBy.trim(),
           notes: v.notes.trim(),
           crExpiry: v.crExpiry,
+          crStatus: v.crStatus,
         });
         toast.success("Client updated");
       } else {
@@ -232,10 +264,29 @@ export function ClientFormDialog({
               />
             </Field>
             <Field label="CR Number">
-              <Input
-                value={form.rank}
-                onChange={(e) => set("rank", e.target.value)}
-              />
+              <div className="flex gap-2">
+                <Input
+                  value={form.rank}
+                  onChange={(e) => set("rank", e.target.value)}
+                  placeholder="e.g. 158007"
+                />
+                {form.type === "commercial" && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={retrieving || !form.rank.trim()}
+                    onClick={handleRetrieve}
+                    className="shrink-0"
+                  >
+                    {retrieving ? "Retrieving…" : "Retrieve"}
+                  </Button>
+                )}
+              </div>
+              {form.type === "commercial" && (
+                <p className="text-[0.7rem] text-muted-foreground">
+                  Fills CR name, expiry &amp; status from Sijilat.
+                </p>
+              )}
             </Field>
             <Field label="CR Expiry Date">
               <Input
