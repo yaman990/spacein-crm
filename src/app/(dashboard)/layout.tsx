@@ -18,6 +18,7 @@ const emptySnapshot: CrmSnapshot = {
   floors: defaultFloors as FloorsMap,
   contracts: [],
   invoices: [],
+  payments: [],
   officeDetails: [],
   building: null,
 };

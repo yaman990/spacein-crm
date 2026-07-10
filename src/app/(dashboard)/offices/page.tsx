@@ -111,6 +111,7 @@ export default function OfficesPage() {
     officeOverrides,
     contracts,
     invoices,
+    payments,
     officeDetails,
     building,
     saveOfficeEdit,
@@ -118,6 +119,7 @@ export default function OfficesPage() {
     saveOfficeDetails,
     saveBuilding,
     markInvoicePaid,
+    recordPayment,
     getReceiptUrl,
     renewContract,
     closeContract,
@@ -718,6 +720,7 @@ export default function OfficesPage() {
         onOpenChange={(open) => !open && setDetailOfficeNo(null)}
         occupancy={detailOfficeNo ? occupancyByNo.get(detailOfficeNo) ?? null : null}
         invoices={invoices}
+        payments={payments}
         clients={clients}
         building={building}
         hasFreeSlot={
@@ -726,6 +729,7 @@ export default function OfficesPage() {
             : false
         }
         onMarkPaid={markInvoicePaid}
+        onRecordPayment={recordPayment}
         getReceiptUrl={getReceiptUrl}
         onRenew={renewContract}
         onClose={closeContract}

@@ -27,6 +27,7 @@ import {
   createContractAction,
   getReceiptUrlAction,
   markInvoicePaidAction,
+  recordPaymentAction,
   renewContractAction,
   runContractChecksAction,
   saveBuildingAction,
@@ -46,6 +47,7 @@ import type {
   Contract,
   Invoice,
   OfficeDetails,
+  Payment,
 } from "@/types/contract";
 
 export interface CrmSnapshot {
@@ -55,6 +57,7 @@ export interface CrmSnapshot {
   floors: FloorsMap;
   contracts: Contract[];
   invoices: Invoice[];
+  payments: Payment[];
   officeDetails: OfficeDetails[];
   building: Building | null;
 }
@@ -89,7 +92,13 @@ interface CrmContextValue extends CrmSnapshot {
   saveOfficeDetails: (details: OfficeDetails) => Promise<void>;
   saveBuilding: (building: Omit<Building, "id"> & { id?: string }) => Promise<void>;
   markInvoicePaid: (invoiceId: string, receipt: File) => Promise<void>;
-  getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  recordPayment: (
+    invoiceId: string,
+    amount: number,
+    receipt: File,
+    note?: string,
+  ) => Promise<void>;
+  getReceiptUrl: (receiptPath: string) => Promise<string | null>;
   renewContract: (contractId: string) => Promise<void>;
   closeContract: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
   updateContract: (input: UpdateContractInput) => Promise<void>;
@@ -113,6 +122,7 @@ export function CrmProvider({
   const [floors, setFloors] = useState(initialData.floors);
   const [contracts, setContracts] = useState(initialData.contracts);
   const [invoices, setInvoices] = useState(initialData.invoices);
+  const [payments, setPayments] = useState(initialData.payments);
   const [officeDetails, setOfficeDetails] = useState(initialData.officeDetails);
   const [building, setBuilding] = useState(initialData.building);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -127,6 +137,7 @@ export function CrmProvider({
       setFloors(data.floors);
       setContracts(data.contracts);
       setInvoices(data.invoices);
+      setPayments(data.payments);
       setOfficeDetails(data.officeDetails);
       setBuilding(data.building);
     } catch (err) {
@@ -273,6 +284,19 @@ export function CrmProvider({
     [refresh],
   );
 
+  const recordPayment = useCallback(
+    async (invoiceId: string, amount: number, receipt: File, note?: string) => {
+      const fd = new FormData();
+      fd.set("invoiceId", invoiceId);
+      fd.set("amount", String(amount));
+      fd.set("receipt", receipt);
+      if (note) fd.set("note", note);
+      await recordPaymentAction(fd);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const getReceiptUrl = useCallback(
     (invoiceId: string) => getReceiptUrlAction(invoiceId),
     [],
@@ -316,6 +340,7 @@ export function CrmProvider({
       floors,
       contracts,
       invoices,
+      payments,
       officeDetails,
       building,
       isHydrated: true,
@@ -336,6 +361,7 @@ export function CrmProvider({
       saveOfficeDetails,
       saveBuilding,
       markInvoicePaid,
+      recordPayment,
       getReceiptUrl,
       renewContract,
       closeContract,
@@ -349,6 +375,7 @@ export function CrmProvider({
       floors,
       contracts,
       invoices,
+      payments,
       officeDetails,
       building,
       isSyncing,
@@ -368,6 +395,7 @@ export function CrmProvider({
       saveOfficeDetails,
       saveBuilding,
       markInvoicePaid,
+      recordPayment,
       getReceiptUrl,
       renewContract,
       closeContract,
@@ -418,6 +446,7 @@ export function useOffices() {
     officeOverrides,
     contracts,
     invoices,
+    payments,
     officeDetails,
     building,
     isHydrated,
@@ -430,6 +459,7 @@ export function useOffices() {
     saveOfficeDetails,
     saveBuilding,
     markInvoicePaid,
+    recordPayment,
     getReceiptUrl,
     renewContract,
     closeContract,
@@ -442,6 +472,7 @@ export function useOffices() {
     officeOverrides,
     contracts,
     invoices,
+    payments,
     officeDetails,
     building,
     isHydrated,
@@ -454,6 +485,7 @@ export function useOffices() {
     saveOfficeDetails,
     saveBuilding,
     markInvoicePaid,
+    recordPayment,
     getReceiptUrl,
     renewContract,
     closeContract,
@@ -463,8 +495,26 @@ export function useOffices() {
 }
 
 export function useContracts() {
-  const { contracts, invoices, clients, isHydrated, isSyncing } = useCrm();
-  return { contracts, invoices, clients, isHydrated, isSyncing };
+  const {
+    contracts,
+    invoices,
+    payments,
+    clients,
+    isHydrated,
+    isSyncing,
+    recordPayment,
+    getReceiptUrl,
+  } = useCrm();
+  return {
+    contracts,
+    invoices,
+    payments,
+    clients,
+    isHydrated,
+    isSyncing,
+    recordPayment,
+    getReceiptUrl,
+  };
 }
 
 /**

@@ -219,6 +219,7 @@ export async function createContractAction(
       discountValue,
       discountKind,
     ),
+    paidAmount: 0,
     status: "issued",
     issuedAt: now,
   };
@@ -515,6 +516,7 @@ export async function renewContractAction(contractId: string): Promise<void> {
     periodStart: cycle.periodStart,
     periodEnd: cycle.periodEnd,
     amount: cycle.amount,
+    paidAmount: 0,
     status: "issued",
     issuedAt: new Date().toISOString(),
   };
@@ -627,47 +629,86 @@ export async function closeContractAction(
  * to the private `receipts` bucket, records it, and activates the contract if
  * it was awaiting payment (reserved / renewal).
  */
-export async function markInvoicePaidAction(formData: FormData): Promise<void> {
-  const session = await requireSession();
-  const supabase = createAdminClient();
-
-  const invoiceId = String(formData.get("invoiceId") || "");
-  const file = formData.get("receipt");
-  if (!invoiceId) throw new Error("Missing invoice");
-  if (!(file instanceof File) || file.size === 0)
-    throw new Error("A receipt PDF is required to mark this paid");
+/**
+ * Records one receipt against an invoice. `requestedAmount === null` pays the
+ * full remaining balance (the "mark paid" path); a number records a partial
+ * payment. The invoice becomes `partial` until fully covered, then `paid` — at
+ * which point the contract activates and the client bridge flips to paid.
+ */
+async function applyPayment(
+  supabase: ReturnType<typeof createAdminClient>,
+  session: Awaited<ReturnType<typeof requireSession>>,
+  invoiceId: string,
+  requestedAmount: number | null,
+  file: File,
+  note?: string,
+): Promise<void> {
   if (file.type !== "application/pdf")
     throw new Error("The receipt must be a PDF file");
   if (file.size > 1024 * 1024)
     throw new Error("The receipt must be 1 MB or less");
 
-  const path = `${invoiceId}.pdf`;
+  const { data: inv, error: iErr } = await supabase
+    .from("invoices")
+    .select("id, contract_id, amount, paid_amount, status")
+    .eq("id", invoiceId)
+    .single();
+  if (iErr || !inv) throw new Error("Invoice not found");
+  if (inv.status === "void") throw new Error("This invoice was written off");
+
+  const total = Number(inv.amount) || 0;
+  const already = Number(inv.paid_amount) || 0;
+  const remaining = Math.round((total - already) * 1000) / 1000;
+  if (remaining <= 0.0005) throw new Error("This invoice is already fully paid");
+
+  let amount =
+    requestedAmount == null ? remaining : Math.round(requestedAmount * 1000) / 1000;
+  if (amount <= 0) throw new Error("Enter a payment amount greater than zero");
+  if (amount > remaining + 0.0005)
+    throw new Error(
+      `That's more than the ${remaining.toFixed(3)} BHD still owed on this invoice`,
+    );
+
+  const paymentId = uid();
+  const path = `${invoiceId}/${paymentId}.pdf`;
   const { error: upErr } = await supabase.storage
     .from("receipts")
     .upload(path, file, { upsert: true, contentType: "application/pdf" });
   if (upErr) throw new Error(upErr.message);
 
-  const { data: inv, error: iErr } = await supabase
+  const now = new Date().toISOString();
+  const { error: pErr } = await supabase.from("payments").insert({
+    id: paymentId,
+    invoice_id: invoiceId,
+    amount,
+    paid_at: now,
+    paid_by_staff_id: session.user.id,
+    receipt_path: path,
+    note: note ?? null,
+  });
+  if (pErr) throw new Error(pErr.message);
+
+  const newPaid = Math.round((already + amount) * 1000) / 1000;
+  const fullyPaid = newPaid >= total - 0.0005;
+  const { error: uErr } = await supabase
     .from("invoices")
     .update({
-      status: "paid",
-      paid_at: new Date().toISOString(),
+      paid_amount: newPaid,
+      status: fullyPaid ? "paid" : "partial",
+      paid_at: fullyPaid ? now : null,
       paid_by_staff_id: session.user.id,
       receipt_path: path,
     })
-    .eq("id", invoiceId)
-    .select("contract_id")
-    .single();
-  if (iErr) throw new Error(iErr.message);
+    .eq("id", invoiceId);
+  if (uErr) throw new Error(uErr.message);
 
-  if (inv?.contract_id) {
+  if (fullyPaid && inv.contract_id) {
     await supabase
       .from("contracts")
       .update({ status: "active" })
       .eq("id", inv.contract_id)
       .in("status", ["reserved", "renewal_await_payment"]);
 
-    // bridge: reflect the payment on the client record too
     const { data: contract } = await supabase
       .from("contracts")
       .select("client_id")
@@ -676,21 +717,48 @@ export async function markInvoicePaidAction(formData: FormData): Promise<void> {
     if (contract?.client_id) {
       await supabase
         .from("clients")
-        .update({ status: "paid", paid_at: new Date().toISOString() })
+        .update({ status: "paid", paid_at: now })
         .eq("id", contract.client_id);
     }
   }
 }
 
+export async function markInvoicePaidAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const supabase = createAdminClient();
+  const invoiceId = String(formData.get("invoiceId") || "");
+  const file = formData.get("receipt");
+  if (!invoiceId) throw new Error("Missing invoice");
+  if (!(file instanceof File) || file.size === 0)
+    throw new Error("A receipt PDF is required to mark this paid");
+  await applyPayment(supabase, session, invoiceId, null, file);
+}
+
+export async function recordPaymentAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const supabase = createAdminClient();
+  const invoiceId = String(formData.get("invoiceId") || "");
+  const amount = Number(formData.get("amount") || 0);
+  const note = String(formData.get("note") || "").trim() || undefined;
+  const file = formData.get("receipt");
+  if (!invoiceId) throw new Error("Missing invoice");
+  if (!(file instanceof File) || file.size === 0)
+    throw new Error("A receipt PDF is required");
+  await applyPayment(supabase, session, invoiceId, amount, file, note);
+}
+
 /** Short-lived signed URL to view/download a receipt. */
 export async function getReceiptUrlAction(
-  invoiceId: string,
+  receiptPath: string,
 ): Promise<string | null> {
   await requireSession();
+  if (!receiptPath) return null;
   const supabase = createAdminClient();
+  // Legacy invoices stored their receipt as "{invoiceId}.pdf"; payments store
+  // "{invoiceId}/{paymentId}.pdf". Either way we sign the stored path directly.
   const { data, error } = await supabase.storage
     .from("receipts")
-    .createSignedUrl(`${invoiceId}.pdf`, 120);
+    .createSignedUrl(receiptPath, 120);
   if (error) return null;
   return data?.signedUrl ?? null;
 }

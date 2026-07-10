@@ -58,15 +58,17 @@ export function summarizeClientBilling(
     let lastPaid: Invoice | null = null;
     for (const c of all) {
       for (const inv of invByContract.get(c.id) ?? []) {
-        if (inv.status === "issued") {
-          outstanding += inv.amount;
+        if ((inv.paidAmount ?? 0) > 0) {
+          if (!lastPaid || inv.periodEnd > lastPaid.periodEnd) lastPaid = inv;
+        }
+        if (inv.status === "void") continue; // written off — ignored
+        const remaining = Math.max(0, inv.amount - (inv.paidAmount ?? 0));
+        if (remaining > 0.0005) {
+          outstanding += remaining;
           openCount++;
           if (!open || inv.periodStart < open.inv.periodStart)
             open = { inv, c };
-        } else if (inv.status === "paid") {
-          if (!lastPaid || inv.periodEnd > lastPaid.periodEnd) lastPaid = inv;
         }
-        // "void" (written off) is ignored entirely
       }
     }
     const liveContracts = all.filter(isLive);
@@ -86,7 +88,7 @@ export function summarizeClientBilling(
       // empty when the client has no live contract (they've moved out)
       office: primaryLive?.officeNo ?? "",
       lastPaidAt: lastPaid?.paidAt,
-      lastPaidAmount: lastPaid?.amount ?? 0,
+      lastPaidAmount: lastPaid?.paidAmount ?? lastPaid?.amount ?? 0,
     });
   }
   return out;
@@ -114,14 +116,14 @@ export function portfolioTotals(
   let outstanding = 0;
   let overdue = 0;
   for (const inv of invoices) {
-    if (inv.status === "paid") {
-      collected += inv.amount;
-    } else if (inv.status === "issued") {
-      // Money owed stays owed even if the contract was closed — only a "void"
-      // write-off removes it.
-      outstanding += inv.amount;
-      if (inv.periodStart && inv.periodStart < todayISO) overdue += inv.amount;
-    }
+    collected += inv.paidAmount ?? 0; // money received (incl. partials)
+    if (inv.status === "void") continue;
+    // Money owed stays owed even if the contract was closed — only a "void"
+    // write-off removes it. Partial payments reduce the remaining balance.
+    const remaining = Math.max(0, inv.amount - (inv.paidAmount ?? 0));
+    outstanding += remaining;
+    if (remaining > 0 && inv.periodStart && inv.periodStart < todayISO)
+      overdue += remaining;
   }
   let mrr = 0;
   for (const c of contracts) {
