@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import type { Client } from "@/types/client";
 import { useClients } from "@/providers/crm-provider";
 import {
-  crExpiryStatus,
   daysUntilDue,
   filterCrClients,
   searchCrClients,
@@ -19,6 +18,8 @@ import {
 import { useTableSort } from "@/hooks/use-table-sort";
 import { ClientRowActions } from "@/components/clients/client-row-actions";
 import { ClientStatusBadge } from "@/components/clients/client-status-badge";
+import { CrStatusBadge } from "@/components/clients/cr-status-badge";
+import { crRegistryState } from "@/lib/cr-registry";
 import { CrExpiryBadge, DueBadge } from "@/components/clients/due-badge";
 import { Input } from "@/components/ui/input";
 import { SortableTableHead } from "@/components/ui/sortable-table-head";
@@ -200,7 +201,7 @@ export function ContractsTable() {
 }
 
 function ContractRow({ client }: { client: Client }) {
-  const crSt = crExpiryStatus(client.crExpiry);
+  const crSt = crRegistryState(client);
   const status = statusOf(client);
   const days = daysUntilDue(client);
 
@@ -218,7 +219,18 @@ function ContractRow({ client }: { client: Client }) {
         {client.company || "—"}
       </TableCell>
       <TableCell className="whitespace-nowrap">
-        {client.crExpiry ? (
+        {crSt.level === "none" ? (
+          <span className="text-sm text-muted-foreground">—</span>
+        ) : crSt.level === "inactive" ? (
+          <div className="flex flex-col items-start gap-0.5">
+            <CrStatusBadge client={client} />
+            {client.crExpiry && (
+              <span className="font-mono text-[0.65rem] text-muted-foreground">
+                exp. {fmtDate(client.crExpiry)}
+              </span>
+            )}
+          </div>
+        ) : (
           <>
             <span
               className={`font-mono text-xs ${
@@ -229,12 +241,10 @@ function ContractRow({ client }: { client: Client }) {
                     : "text-muted-foreground"
               }`}
             >
-              {fmtDate(client.crExpiry)}
+              {client.crExpiry ? fmtDate(client.crExpiry) : "Active"}
             </span>
             <CrExpiryBadge days={crSt.days} />
           </>
-        ) : (
-          <span className="text-sm text-muted-foreground">—</span>
         )}
       </TableCell>
       <TableCell className="whitespace-nowrap">

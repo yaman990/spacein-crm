@@ -30,6 +30,8 @@ export interface Client {
   createdAt: string;
   paidAt?: string;
   crExpiry?: string;
+  /** Registry status from Sijilat (Active / Suspended / Cancelled …). */
+  crStatus?: string;
 }
 
 export type ClientInput = Omit<Client, "id" | "createdAt" | "paidAt"> & {

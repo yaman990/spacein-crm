@@ -34,6 +34,7 @@ export interface ClientRow {
   created_at: string;
   paid_at: string | null;
   cr_expiry: string | null;
+  cr_status?: string | null;
 }
 
 export interface ActivityRow {
@@ -90,6 +91,7 @@ export function clientToRow(
     created_at: "createdAt" in client ? client.createdAt : undefined,
     paid_at: "paidAt" in client ? (client.paidAt ?? null) : null,
     cr_expiry: emptyToNull(client.crExpiry),
+    cr_status: emptyToNull(client.crStatus),
   };
 }
 
@@ -120,6 +122,7 @@ export function rowToClient(row: ClientRow): Client {
     createdAt: row.created_at,
     paidAt: row.paid_at ?? undefined,
     crExpiry: row.cr_expiry ?? undefined,
+    crStatus: row.cr_status ?? undefined,
   };
 }
 

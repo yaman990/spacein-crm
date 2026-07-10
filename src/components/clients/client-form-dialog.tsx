@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { CrStatusBadge } from "@/components/clients/cr-status-badge";
 
 // The client record holds identity data only. Everything financial (rent,
 // invoices, due dates, payment status) lives on the client's contracts and is
@@ -242,6 +243,12 @@ export function ClientFormDialog({
                 value={form.crExpiry}
                 onChange={(e) => set("crExpiry", e.target.value)}
               />
+              {client?.crStatus && (
+                <p className="flex items-center gap-1.5 text-[0.7rem] text-muted-foreground">
+                  Registry status:
+                  <CrStatusBadge client={client} />
+                </p>
+              )}
             </Field>
             {form.type === "commercial" && (
               <div className="col-span-2 space-y-3 rounded-lg border border-border bg-muted/30 p-3">

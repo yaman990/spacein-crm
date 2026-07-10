@@ -10,6 +10,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import {
+  applyCrUpdatesAction,
   createClientAction,
   deleteClientAction,
   fetchCrmData,
@@ -63,6 +64,9 @@ interface CrmContextValue extends CrmSnapshot {
   refresh: () => Promise<void>;
   addClient: (input: ClientInput) => Promise<Client>;
   updateClient: (id: string, input: Partial<ClientInput>) => Promise<void>;
+  applyCrUpdates: (
+    updates: { id: string; crExpiry?: string; crStatus?: string }[],
+  ) => Promise<number>;
   deleteClient: (id: string) => Promise<void>;
   markPaid: (id: string) => Promise<void>;
   setOfficeOverride: (key: string, value: string) => Promise<void>;
@@ -146,6 +150,17 @@ export function CrmProvider({
     async (id: string, input: Partial<ClientInput>) => {
       await updateClientAction(id, input);
       await refresh();
+    },
+    [refresh],
+  );
+
+  const applyCrUpdates = useCallback(
+    async (
+      updates: { id: string; crExpiry?: string; crStatus?: string }[],
+    ) => {
+      const n = await applyCrUpdatesAction(updates);
+      await refresh();
+      return n;
     },
     [refresh],
   );
@@ -307,6 +322,7 @@ export function CrmProvider({
       refresh,
       addClient,
       updateClient,
+      applyCrUpdates,
       deleteClient,
       markPaid,
       setOfficeOverride,
@@ -338,6 +354,7 @@ export function CrmProvider({
       refresh,
       addClient,
       updateClient,
+      applyCrUpdates,
       deleteClient,
       markPaid,
       setOfficeOverride,

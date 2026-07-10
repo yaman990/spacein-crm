@@ -218,6 +218,40 @@ export async function updateClientAction(
   await logActivity("created", id, merged.name, `Client updated: ${merged.name}`);
 }
 
+/**
+ * Bulk-apply CR expiry/status updates from a Sijilat refresh. Only the two CR
+ * columns are touched — everything else on the client is left untouched.
+ */
+export async function applyCrUpdatesAction(
+  updates: { id: string; crExpiry?: string; crStatus?: string }[],
+): Promise<number> {
+  await requireSession();
+  const supabase = createAdminClient();
+
+  let applied = 0;
+  for (const u of updates) {
+    if (!u.id) continue;
+    const patch: { cr_expiry?: string | null; cr_status?: string | null } = {};
+    if (u.crExpiry !== undefined) patch.cr_expiry = u.crExpiry || null;
+    if (u.crStatus !== undefined) patch.cr_status = u.crStatus || null;
+    if (Object.keys(patch).length === 0) continue;
+    const { error } = await supabase
+      .from("clients")
+      .update(patch)
+      .eq("id", u.id);
+    if (error) throw new Error(error.message);
+    applied++;
+  }
+
+  await logActivity(
+    "created",
+    "",
+    "Sijilat",
+    `CR data refreshed for ${applied} client${applied === 1 ? "" : "s"}`,
+  );
+  return applied;
+}
+
 export async function deleteClientAction(id: string): Promise<void> {
   await requireSession();
   const supabase = createAdminClient();
