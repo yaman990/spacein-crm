@@ -123,6 +123,7 @@ export function ClientFormDialog({
       setForm((prev) => ({
         ...prev,
         company: r.nameEnglish || prev.company,
+        rank: r.branchNumber ? `${r.crNumber}-${r.branchNumber}` : r.crNumber,
         crExpiry: r.expiry || prev.crExpiry,
         crStatus: r.status || prev.crStatus,
       }));
@@ -294,10 +295,23 @@ export function ClientFormDialog({
                 value={form.crExpiry}
                 onChange={(e) => set("crExpiry", e.target.value)}
               />
-              {client?.crStatus && (
+            </Field>
+            <Field label="CR Status">
+              <Input
+                value={form.crStatus}
+                onChange={(e) => set("crStatus", e.target.value)}
+                placeholder="Filled from Sijilat"
+              />
+              {form.crStatus && (
                 <p className="flex items-center gap-1.5 text-[0.7rem] text-muted-foreground">
                   Registry status:
-                  <CrStatusBadge client={client} />
+                  <CrStatusBadge
+                    client={{
+                      crExpiry: form.crExpiry,
+                      crStatus: form.crStatus,
+                    }}
+                    hideNone
+                  />
                 </p>
               )}
             </Field>
