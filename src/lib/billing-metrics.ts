@@ -2,9 +2,10 @@ import { monthsBetween } from "@/lib/contract-checks";
 import type { Contract, Invoice } from "@/types/contract";
 
 // The money figures are computed from the FULL invoice history, never from the
-// single cached amount on the client row. A contract is "live" unless closed;
-// its invoices are what the tenant has been billed. Paid invoices are money
-// received; issued (unpaid) invoices are money owed.
+// single cached amount on the client row. Paid invoices are money received;
+// "issued" invoices are money owed and stay owed even after the contract is
+// closed — only an explicit "void" (write-off) clears them. A contract is
+// "live" unless closed; that governs the office/rent shown, not the balance.
 
 const isLive = (c: Contract) => c.status !== "closed";
 const MRR_STATUS = new Set(["active", "reserved", "renewal_await_payment"]);
@@ -33,12 +34,14 @@ export function summarizeClientBilling(
   contracts: Contract[],
   invoices: Invoice[],
 ): Map<string, ClientBilling> {
-  const liveByClient = new Map<string, Contract[]>();
+  // Group ALL of a client's contracts (closed included) so an unpaid balance on
+  // a closed contract still surfaces; the office/rent shown comes from a live
+  // contract only, so a departed tenant reads with no office.
+  const byClient = new Map<string, Contract[]>();
   for (const c of contracts) {
-    if (!isLive(c)) continue;
-    const arr = liveByClient.get(c.clientId);
+    const arr = byClient.get(c.clientId);
     if (arr) arr.push(c);
-    else liveByClient.set(c.clientId, [c]);
+    else byClient.set(c.clientId, [c]);
   }
   const invByContract = new Map<string, Invoice[]>();
   for (const inv of invoices) {
@@ -48,36 +51,40 @@ export function summarizeClientBilling(
   }
 
   const out = new Map<string, ClientBilling>();
-  for (const [clientId, live] of liveByClient) {
+  for (const [clientId, all] of byClient) {
     let outstanding = 0;
     let openCount = 0;
     let open: { inv: Invoice; c: Contract } | null = null;
     let lastPaid: Invoice | null = null;
-    for (const c of live) {
+    for (const c of all) {
       for (const inv of invByContract.get(c.id) ?? []) {
         if (inv.status === "issued") {
           outstanding += inv.amount;
           openCount++;
           if (!open || inv.periodStart < open.inv.periodStart)
             open = { inv, c };
-        } else if (!lastPaid || inv.periodEnd > lastPaid.periodEnd) {
-          lastPaid = inv;
+        } else if (inv.status === "paid") {
+          if (!lastPaid || inv.periodEnd > lastPaid.periodEnd) lastPaid = inv;
         }
+        // "void" (written off) is ignored entirely
       }
     }
-    const primary = open?.c ?? live[0];
+    const liveContracts = all.filter(isLive);
+    const primaryLive =
+      open && isLive(open.c) ? open.c : liveContracts[0] ?? null;
     out.set(clientId, {
       outstanding,
       openCount,
       earliestDue: open?.inv.periodStart ?? "",
-      monthlyRent: primary.monthlyRent,
+      monthlyRent: primaryLive?.monthlyRent ?? 0,
       rentStart: open?.inv.periodStart ?? "",
       rentEnd: open?.inv.periodEnd ?? "",
       // month count of the actual open cycle, so clamped/short cycles print right
       months: open
         ? Math.max(1, monthsBetween(open.inv.periodStart, open.inv.periodEnd))
-        : primary.paymentMonths || primary.months,
-      office: primary.officeNo ?? "",
+        : primaryLive?.paymentMonths || primaryLive?.months || 0,
+      // empty when the client has no live contract (they've moved out)
+      office: primaryLive?.officeNo ?? "",
       lastPaidAt: lastPaid?.paidAt,
       lastPaidAmount: lastPaid?.amount ?? 0,
     });
@@ -103,18 +110,18 @@ export function portfolioTotals(
   invoices: Invoice[],
   todayISO: string,
 ): PortfolioTotals {
-  const liveIds = new Set(contracts.filter(isLive).map((c) => c.id));
   let collected = 0;
   let outstanding = 0;
   let overdue = 0;
   for (const inv of invoices) {
     if (inv.status === "paid") {
       collected += inv.amount;
-      continue;
+    } else if (inv.status === "issued") {
+      // Money owed stays owed even if the contract was closed — only a "void"
+      // write-off removes it.
+      outstanding += inv.amount;
+      if (inv.periodStart && inv.periodStart < todayISO) overdue += inv.amount;
     }
-    if (!liveIds.has(inv.contractId)) continue; // unpaid on a closed contract
-    outstanding += inv.amount;
-    if (inv.periodStart && inv.periodStart < todayISO) overdue += inv.amount;
   }
   let mrr = 0;
   for (const c of contracts) {

@@ -35,7 +35,7 @@ export function overlayClientBilling(
     if (s.openCount > 0) {
       return {
         ...client,
-        office: s.office || client.office,
+        office: s.office,
         invoiceType: "rent" as const,
         amount: s.outstanding,
         dueDate: s.earliestDue,

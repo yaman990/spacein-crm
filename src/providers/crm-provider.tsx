@@ -91,7 +91,7 @@ interface CrmContextValue extends CrmSnapshot {
   markInvoicePaid: (invoiceId: string, receipt: File) => Promise<void>;
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   renewContract: (contractId: string) => Promise<void>;
-  closeContract: (contractId: string) => Promise<void>;
+  closeContract: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
   updateContract: (input: UpdateContractInput) => Promise<void>;
   runContractChecks: () => Promise<ChecksSummary>;
 }
@@ -287,8 +287,8 @@ export function CrmProvider({
   );
 
   const closeContract = useCallback(
-    async (contractId: string) => {
-      await closeContractAction(contractId);
+    async (contractId: string, writeOffUnpaid = false) => {
+      await closeContractAction(contractId, writeOffUnpaid);
       await refresh();
     },
     [refresh],

@@ -72,7 +72,7 @@ export default function AlertsPage() {
   const openAmountByContract = useMemo(() => {
     const m = new Map<string, number>();
     invoices.forEach((i) => {
-      if (i.status !== "paid")
+      if (i.status === "issued")
         m.set(i.contractId, (m.get(i.contractId) ?? 0) + i.amount);
     });
     return m;

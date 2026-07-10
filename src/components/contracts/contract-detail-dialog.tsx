@@ -7,6 +7,7 @@ import type { Building, Contract, Invoice, ContractStatus } from "@/types/contra
 import type { Client } from "@/types/client";
 import type { OfficeOccupancy } from "@/lib/office-contracts";
 import { openContractPrintWindow } from "@/lib/document-print";
+import { bhd } from "@/lib/format";
 import {
   Dialog,
   DialogContent,
@@ -50,7 +51,7 @@ export function ContractDetailDialog({
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   onRenew: (contractId: string) => Promise<void>;
-  onClose: (contractId: string) => Promise<void>;
+  onClose: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
   onEdit: (contract: Contract) => void;
   onAddContract: () => void;
 }) {
@@ -115,7 +116,7 @@ function ContractCard({
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
   getReceiptUrl: (invoiceId: string) => Promise<string | null>;
   onRenew: (contractId: string) => Promise<void>;
-  onClose: (contractId: string) => Promise<void>;
+  onClose: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
   onEdit: (contract: Contract) => void;
   building: Building | null;
 }) {
@@ -137,10 +138,25 @@ function ContractCard({
 
   async function close() {
     if (!window.confirm("Close this contract and free the office?")) return;
+    const unpaid = invoices
+      .filter((i) => i.status === "issued")
+      .reduce((s, i) => s + i.amount, 0);
+    let writeOff = false;
+    if (unpaid > 0) {
+      writeOff = window.confirm(
+        `This tenant still owes ${bhd(unpaid)}.\n\n` +
+          `OK  = write it off (the unpaid invoice is cancelled).\n` +
+          `Cancel = keep it as an outstanding balance to collect.`,
+      );
+    }
     setBusy("close");
     try {
-      await onClose(contract.id);
-      toast.success("Contract closed — office is now available");
+      await onClose(contract.id, writeOff);
+      toast.success(
+        writeOff
+          ? "Contract closed — office freed, unpaid balance written off"
+          : "Contract closed — office is now available",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Close failed");
     } finally {
@@ -286,6 +302,10 @@ function InvoiceRow({
               <FileText className="mr-1 size-3.5" /> Receipt
             </Button>
           </>
+        ) : invoice.status === "void" ? (
+          <Badge variant="outline" className="text-muted-foreground line-through">
+            Written off
+          </Badge>
         ) : (
           <>
             <Badge variant="outline">Unpaid</Badge>

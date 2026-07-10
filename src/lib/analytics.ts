@@ -23,6 +23,7 @@ const MONTHS = [
 export function revenueByMonth(invoices: Invoice[]) {
   const months: Record<string, number> = {};
   invoices.forEach((inv) => {
+    if (inv.status === "void") return; // written off — not revenue
     // Billed revenue by the month the cycle covers — every invoice, paid or not.
     const key = (inv.periodStart || inv.issuedAt || "").slice(0, 7);
     if (!key) return;

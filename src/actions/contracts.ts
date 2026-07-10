@@ -106,11 +106,64 @@ export interface CreateContractInput {
  * Later cycles are issued by the "Run renewals & reminders" check ~30 days
  * before each cycle begins.
  */
+const OCCUPYING_STATUSES = [
+  "reserved",
+  "active",
+  "renewal_await_payment",
+  "expired",
+];
+
+/**
+ * Server-side single-occupancy guard: rejects putting a contract on an office
+ * that has no free slot (single-tenant offices hold one; multi-tenant hold
+ * `capacity`). The screen already hides taken offices, but this stops a race or
+ * a stale view from double-booking and double-billing a room.
+ */
+async function assertOfficeAvailable(
+  supabase: ReturnType<typeof createAdminClient>,
+  floorKey: string | undefined,
+  officeNo: string | undefined,
+  excludeContractId?: string,
+): Promise<void> {
+  if (!floorKey || !officeNo) return;
+  const [cRes, dRes] = await Promise.all([
+    supabase
+      .from("contracts")
+      .select("id, status")
+      .eq("floor_key", floorKey)
+      .eq("office_no", officeNo)
+      .in("status", OCCUPYING_STATUSES),
+    supabase
+      .from("office_details")
+      .select("multi_tenant, capacity")
+      .eq("floor_key", floorKey)
+      .eq("office_no", officeNo)
+      .maybeSingle(),
+  ]);
+  if (cRes.error) throw new Error(cRes.error.message);
+  const det = dRes.data as { multi_tenant?: boolean; capacity?: number } | null;
+  const capacity = det?.multi_tenant
+    ? Math.max(1, Number(det.capacity) || 1)
+    : 1;
+  const used = (cRes.data ?? []).filter(
+    (r) => r.id !== excludeContractId,
+  ).length;
+  if (used >= capacity) {
+    throw new Error(
+      capacity > 1
+        ? `Office ${officeNo} is full (${used}/${capacity} occupied). Pick another office.`
+        : `Office ${officeNo} is already occupied. Free it first, or pick another office.`,
+    );
+  }
+}
+
 export async function createContractAction(
   input: CreateContractInput,
 ): Promise<Contract> {
   const session = await requireSession();
   const supabase = createAdminClient();
+
+  await assertOfficeAvailable(supabase, input.floorKey, input.officeNo);
 
   const discountValue = input.discountValue ?? 0;
   const discountKind = input.discountKind ?? "fixed";
@@ -317,6 +370,12 @@ export async function updateContractAction(
       changes.push("client changed");
     }
     if (input.officeNo && input.officeNo !== row.office_no) {
+      await assertOfficeAvailable(
+        supabase,
+        input.floorKey ?? (row.floor_key as string | undefined),
+        input.officeNo,
+        input.contractId,
+      );
       patch.floor_key = input.floorKey ?? row.floor_key;
       patch.office_no = input.officeNo;
       changes.push(`office → ${input.officeNo}`);
@@ -484,14 +543,23 @@ export async function renewContractAction(contractId: string): Promise<void> {
   });
 }
 
-/** Close a contract → frees the office. Creator staff or an admin only. */
-export async function closeContractAction(contractId: string): Promise<void> {
+/**
+ * Close a contract → frees the office. Creator staff or an admin only.
+ * Any unpaid invoice stays as an outstanding balance UNLESS `writeOffUnpaid`
+ * is set, in which case it's voided (written off). When the client has no other
+ * live contract, their cached office/billing is cleared so a departed tenant
+ * doesn't linger as an active, rent-owing client.
+ */
+export async function closeContractAction(
+  contractId: string,
+  writeOffUnpaid = false,
+): Promise<void> {
   const session = await requireSession();
   const supabase = createAdminClient();
 
   const { data: row, error } = await supabase
     .from("contracts")
-    .select("created_by_staff_id")
+    .select("id, client_id, contract_no, created_by_staff_id")
     .eq("id", contractId)
     .single();
   if (error || !row) throw new Error("Contract not found");
@@ -507,6 +575,51 @@ export async function closeContractAction(contractId: string): Promise<void> {
     .update({ status: "closed" })
     .eq("id", contractId);
   if (cErr) throw new Error(cErr.message);
+
+  if (writeOffUnpaid) {
+    const { error: vErr } = await supabase
+      .from("invoices")
+      .update({ status: "void" })
+      .eq("contract_id", contractId)
+      .eq("status", "issued");
+    if (vErr) throw new Error(vErr.message);
+  }
+
+  const clientId = row.client_id as string;
+  const { data: others } = await supabase
+    .from("contracts")
+    .select("id")
+    .eq("client_id", clientId)
+    .neq("id", contractId)
+    .neq("status", "closed");
+  if (!others || others.length === 0) {
+    await supabase
+      .from("clients")
+      .update({
+        office: "",
+        monthly_rent: null,
+        rent_start: null,
+        rent_end: null,
+        rent_months: null,
+        amount: 0,
+        due_date: null,
+        status: "pending",
+        paid_at: null,
+      })
+      .eq("id", clientId);
+  }
+
+  await supabase.from("activity_log").insert({
+    id: uid(),
+    type: "created",
+    cid: clientId,
+    cname: session.user.name ?? "",
+    description: `Contract ${row.contract_no ?? ""} closed${
+      writeOffUnpaid ? " — unpaid balance written off" : ""
+    }`,
+    amt: null,
+    ts: new Date().toISOString(),
+  });
 }
 
 /**

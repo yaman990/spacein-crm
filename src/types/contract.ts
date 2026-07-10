@@ -43,7 +43,7 @@ export interface Contract {
   createdAt: string;
 }
 
-export type InvoiceStatus = "issued" | "paid";
+export type InvoiceStatus = "issued" | "paid" | "void";
 
 export interface Invoice {
   id: string;
