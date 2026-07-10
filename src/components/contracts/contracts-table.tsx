@@ -2,14 +2,13 @@
 
 import { useMemo, useState } from "react";
 import type { Client } from "@/types/client";
-import { useClients } from "@/providers/crm-provider";
+import { useClients, useContracts } from "@/providers/crm-provider";
+import { daysUntilDue, searchCrClients, statusOf } from "@/lib/contracts";
 import {
-  daysUntilDue,
-  filterCrClients,
-  searchCrClients,
-  statusOf,
-  type CrFilter,
-} from "@/lib/contracts";
+  arrangeClients,
+  buildLeaseIndex,
+  type ArrangeFilter,
+} from "@/lib/client-arrange";
 import { bhd, fmtDate } from "@/lib/format";
 import {
   sortContractsByColumn,
@@ -19,6 +18,7 @@ import { useTableSort } from "@/hooks/use-table-sort";
 import { ClientRowActions } from "@/components/clients/client-row-actions";
 import { ClientStatusBadge } from "@/components/clients/client-status-badge";
 import { CrStatusBadge } from "@/components/clients/cr-status-badge";
+import { ArrangeFilterSelect } from "@/components/clients/arrange-filter";
 import { crRegistryState } from "@/lib/cr-registry";
 import { CrExpiryBadge, DueBadge } from "@/components/clients/due-badge";
 import { Input } from "@/components/ui/input";
@@ -32,43 +32,23 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import type { ClientStatus } from "@/types/client";
-
-const filters: { value: CrFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "cr-expired", label: "CR Expired" },
-  { value: "cr-soon", label: "CR Expiring" },
-  { value: "contract-overdue", label: "Overdue" },
-  { value: "contract-soon", label: "Due 30d" },
-  { value: "no-cr", label: "No CR Date" },
-];
 
 export function ContractsTable() {
   const { clients, isHydrated } = useClients();
-  const [filter, setFilter] = useState<CrFilter>("all");
-  const [statusFilter, setStatusFilter] = useState<ClientStatus | "all">("all");
+  const { contracts } = useContracts();
+  const [filter, setFilter] = useState<ArrangeFilter>("all");
   const [search, setSearch] = useState("");
   const { sortKey, direction, toggleSort } = useTableSort<ContractSortKey>(
     "priority",
     "asc",
   );
 
+  const leaseIndex = useMemo(() => buildLeaseIndex(contracts), [contracts]);
   const filtered = useMemo(() => {
-    let list = filterCrClients(clients, filter);
-    if (statusFilter !== "all") {
-      list = list.filter((c) => statusOf(c) === statusFilter);
-    }
+    let list = arrangeClients(clients, filter, leaseIndex);
     list = searchCrClients(list, search);
     return sortContractsByColumn(list, sortKey, direction);
-  }, [clients, filter, statusFilter, search, sortKey, direction]);
+  }, [clients, filter, leaseIndex, search, sortKey, direction]);
 
   if (!isHydrated) {
     return (
@@ -82,40 +62,13 @@ export function ContractsTable() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <Tabs value={filter} onValueChange={(v) => setFilter(v as CrFilter)}>
-          <TabsList className="flex h-auto flex-wrap gap-1">
-            {filters.map((f) => (
-              <TabsTrigger key={f.value} value={f.value} className="text-xs">
-                {f.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Select
-            value={statusFilter}
-            onValueChange={(v) =>
-              setStatusFilter(v as ClientStatus | "all")
-            }
-          >
-            <SelectTrigger className="w-full sm:w-36">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="overdue">Overdue</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="sent">Sent</SelectItem>
-              <SelectItem value="paid">Paid</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
-            placeholder="Search clients…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full sm:max-w-xs"
-          />
-        </div>
+        <ArrangeFilterSelect value={filter} onChange={setFilter} />
+        <Input
+          placeholder="Search clients…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full sm:max-w-xs"
+        />
       </div>
 
       <p className="text-sm text-muted-foreground">
