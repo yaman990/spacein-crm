@@ -37,6 +37,7 @@ import {
   type UpdateContractInput,
 } from "@/actions/contracts";
 import { statusOf } from "@/lib/client-status";
+import { portfolioTotals } from "@/lib/billing-metrics";
 import type { ActivityLogEntry } from "@/types/activity";
 import type { Client, ClientInput, ClientType } from "@/types/client";
 import type { FloorsMap, OfficeOverrides } from "@/types/office";
@@ -510,7 +511,7 @@ export function buildClientFromForm(values: {
 }
 
 export function useClientStats() {
-  const { clients } = useCrm();
+  const { clients, contracts, invoices } = useCrm();
   return useMemo(() => {
     const total = clients.length;
     const pending = clients.filter((c) =>
@@ -518,25 +519,20 @@ export function useClientStats() {
     ).length;
     const overdue = clients.filter((c) => statusOf(c) === "overdue").length;
     const paid = clients.filter((c) => statusOf(c) === "paid").length;
-    const collected = clients
-      .filter((c) => statusOf(c) === "paid")
-      .reduce((s, c) => s + Number(c.amount || 0), 0);
-    const portfolio = clients.reduce((s, c) => s + Number(c.amount || 0), 0);
-    const outstanding = clients
-      .filter((c) => ["pending", "sent"].includes(statusOf(c)))
-      .reduce((s, c) => s + Number(c.amount || 0), 0);
-    const overdueAmount = clients
-      .filter((c) => statusOf(c) === "overdue")
-      .reduce((s, c) => s + Number(c.amount || 0), 0);
+    // Money comes from the full invoice history, not the cached client field,
+    // so totals reflect every cycle rather than one collapsed invoice.
+    const today = new Date().toISOString().slice(0, 10);
+    const money = portfolioTotals(contracts, invoices, today);
     return {
       total,
       pending,
       overdue,
       paid,
-      collected,
-      portfolio,
-      outstanding,
-      overdueAmount,
+      collected: money.collected,
+      portfolio: money.portfolio,
+      outstanding: money.outstanding,
+      overdueAmount: money.overdue,
+      mrr: money.mrr,
     };
-  }, [clients]);
+  }, [clients, contracts, invoices]);
 }

@@ -598,9 +598,16 @@ export interface ChecksSummary {
  * "Already reminded" is tracked in crm_settings keyed by contract+end date, so
  * renewals (new end date) naturally re-trigger. No cron required — run on demand.
  */
-export async function runContractChecksAction(): Promise<ChecksSummary> {
-  const session = await requireSession();
-  if (session.user.role !== "admin") throw new Error("Admin only");
+export async function runContractChecksAction(
+  cronToken?: string,
+): Promise<ChecksSummary> {
+  // Authorized either by an admin session (the "Run checks" button) or by the
+  // scheduled cron passing the shared secret (see /api/cron/checks).
+  const secret = process.env.CRON_SECRET;
+  if (!(cronToken && secret && cronToken === secret)) {
+    const session = await requireSession();
+    if (session.user.role !== "admin") throw new Error("Admin only");
+  }
   const supabase = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();
@@ -712,45 +719,57 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
   }
   for (const c of contracts) {
     if (c.status !== "active") continue;
-    const lastEnd = latestEndByContract.get(c.id) ?? c.startDate;
-    const cycle = nextCycle(c, lastEnd);
-    if (!cycle) continue; // term fully invoiced
-    if (daysUntil(cycle.periodStart, today) > 30) continue; // not due yet
-    await supabase.from("invoices").insert(
-      invoiceToRow({
-        id: uid(),
-        contractId: c.id,
+    let lastEnd = latestEndByContract.get(c.id) ?? c.startDate;
+    // Issue EVERY cycle that has already started or begins within 30 days, not
+    // just the next one — so a contract that fell several cycles behind is
+    // fully caught up in a single run. Bounded by the term (nextCycle → null).
+    for (let guard = 0; guard < 120; guard++) {
+      const cycle = nextCycle(c, lastEnd);
+      if (!cycle) break; // term fully invoiced
+      if (daysUntil(cycle.periodStart, today) > 30) break; // not due yet
+      await supabase.from("invoices").insert(
+        invoiceToRow({
+          id: uid(),
+          contractId: c.id,
+          periodStart: cycle.periodStart,
+          periodEnd: cycle.periodEnd,
+          amount: cycle.amount,
+          status: "issued",
+          issuedAt: now,
+        }),
+      );
+      await syncClientBilling(supabase, {
+        clientId: c.clientId,
+        monthlyRent: c.monthlyRent,
+        months: cycle.months,
         periodStart: cycle.periodStart,
         periodEnd: cycle.periodEnd,
         amount: cycle.amount,
-        status: "issued",
-        issuedAt: now,
-      }),
-    );
-    await syncClientBilling(supabase, {
-      clientId: c.clientId,
-      monthlyRent: c.monthlyRent,
-      months: cycle.months,
-      periodStart: cycle.periodStart,
-      periodEnd: cycle.periodEnd,
-      amount: cycle.amount,
-    });
-    summary.cyclesInvoiced++;
-    const cl = clientById.get(c.clientId);
-    const st = c.createdByStaffId ? staffById.get(c.createdByStaffId) : undefined;
-    await send(
-      cl?.email,
-      `Invoice for Office ${c.officeNo} — next rent period`,
-      `Dear ${nameOf(c.clientId)},\n\nYour next rent period for Office ${c.officeNo} (contract ${c.contractNo}) runs ${cycle.periodStart} to ${cycle.periodEnd}.\n\nAmount: ${cycle.amount.toFixed(3)} BHD, payable in advance by ${cycle.periodStart}. Kindly arrange the transfer and send us the receipt.\n\nSpace IN Business Center`,
-    );
-    await send(
-      st?.email,
-      `Cycle invoice issued — ${c.contractNo} (Office ${c.officeNo})`,
-      `Next payment cycle invoiced for ${nameOf(c.clientId)}: ${cycle.periodStart} → ${cycle.periodEnd}, ${cycle.amount.toFixed(3)} BHD, due ${cycle.periodStart}.`,
-    );
-    summary.details.push(
-      `Cycle invoiced ${c.contractNo} (${cycle.periodStart} → ${cycle.periodEnd})`,
-    );
+      });
+      summary.cyclesInvoiced++;
+      summary.details.push(
+        `Cycle invoiced ${c.contractNo} (${cycle.periodStart} → ${cycle.periodEnd})`,
+      );
+      // Email only for the upcoming cycle; silently backfill already-started
+      // (overdue) cycles so a catch-up run doesn't flood the tenant.
+      if (daysUntil(cycle.periodStart, today) >= 0) {
+        const cl = clientById.get(c.clientId);
+        const st = c.createdByStaffId
+          ? staffById.get(c.createdByStaffId)
+          : undefined;
+        await send(
+          cl?.email,
+          `Invoice for Office ${c.officeNo} — next rent period`,
+          `Dear ${nameOf(c.clientId)},\n\nYour next rent period for Office ${c.officeNo} (contract ${c.contractNo}) runs ${cycle.periodStart} to ${cycle.periodEnd}.\n\nAmount: ${cycle.amount.toFixed(3)} BHD, payable in advance by ${cycle.periodStart}. Kindly arrange the transfer and send us the receipt.\n\nSpace IN Business Center`,
+        );
+        await send(
+          st?.email,
+          `Cycle invoice issued — ${c.contractNo} (Office ${c.officeNo})`,
+          `Next payment cycle invoiced for ${nameOf(c.clientId)}: ${cycle.periodStart} → ${cycle.periodEnd}, ${cycle.amount.toFixed(3)} BHD, due ${cycle.periodStart}.`,
+        );
+      }
+      lastEnd = cycle.periodEnd; // advance so the next iteration chains forward
+    }
   }
 
   for (const c of dueExpiry) {
