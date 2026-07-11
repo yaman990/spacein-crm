@@ -3,10 +3,17 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { FileText, Printer, Upload } from "lucide-react";
-import type { Building, Contract, Invoice, ContractStatus } from "@/types/contract";
+import type {
+  Building,
+  Contract,
+  Invoice,
+  Payment,
+  ContractStatus,
+} from "@/types/contract";
 import type { Client } from "@/types/client";
 import type { OfficeOccupancy } from "@/lib/office-contracts";
 import { openContractPrintWindow } from "@/lib/document-print";
+import { bhd, fmtDateTime } from "@/lib/format";
 import {
   Dialog,
   DialogContent,
@@ -30,10 +37,12 @@ export function ContractDetailDialog({
   onOpenChange,
   occupancy,
   invoices,
+  payments,
   clients,
   building,
   hasFreeSlot,
   onMarkPaid,
+  onRecordPayment,
   getReceiptUrl,
   onRenew,
   onClose,
@@ -44,13 +53,20 @@ export function ContractDetailDialog({
   onOpenChange: (open: boolean) => void;
   occupancy: OfficeOccupancy | null;
   invoices: Invoice[];
+  payments: Payment[];
   clients: Client[];
   building: Building | null;
   hasFreeSlot: boolean;
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
-  getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  onRecordPayment: (
+    invoiceId: string,
+    amount: number,
+    receipt: File,
+    note?: string,
+  ) => Promise<void>;
+  getReceiptUrl: (receiptPath: string) => Promise<string | null>;
   onRenew: (contractId: string) => Promise<void>;
-  onClose: (contractId: string) => Promise<void>;
+  onClose: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
   onEdit: (contract: Contract) => void;
   onAddContract: () => void;
 }) {
@@ -78,7 +94,9 @@ export function ContractDetailDialog({
               invoices={invoices
                 .filter((i) => i.contractId === c.id)
                 .sort((a, b) => (a.periodStart < b.periodStart ? -1 : 1))}
+              payments={payments}
               onMarkPaid={onMarkPaid}
+              onRecordPayment={onRecordPayment}
               getReceiptUrl={getReceiptUrl}
               onRenew={onRenew}
               onClose={onClose}
@@ -102,7 +120,9 @@ function ContractCard({
   contract,
   client,
   invoices,
+  payments,
   onMarkPaid,
+  onRecordPayment,
   getReceiptUrl,
   onRenew,
   onClose,
@@ -112,10 +132,17 @@ function ContractCard({
   contract: Contract;
   client?: Client;
   invoices: Invoice[];
+  payments: Payment[];
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
-  getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  onRecordPayment: (
+    invoiceId: string,
+    amount: number,
+    receipt: File,
+    note?: string,
+  ) => Promise<void>;
+  getReceiptUrl: (receiptPath: string) => Promise<string | null>;
   onRenew: (contractId: string) => Promise<void>;
-  onClose: (contractId: string) => Promise<void>;
+  onClose: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
   onEdit: (contract: Contract) => void;
   building: Building | null;
 }) {
@@ -137,10 +164,25 @@ function ContractCard({
 
   async function close() {
     if (!window.confirm("Close this contract and free the office?")) return;
+    const unpaid = invoices
+      .filter((i) => i.status === "issued")
+      .reduce((s, i) => s + i.amount, 0);
+    let writeOff = false;
+    if (unpaid > 0) {
+      writeOff = window.confirm(
+        `This tenant still owes ${bhd(unpaid)}.\n\n` +
+          `OK  = write it off (the unpaid invoice is cancelled).\n` +
+          `Cancel = keep it as an outstanding balance to collect.`,
+      );
+    }
     setBusy("close");
     try {
-      await onClose(contract.id);
-      toast.success("Contract closed — office is now available");
+      await onClose(contract.id, writeOff);
+      toast.success(
+        writeOff
+          ? "Contract closed — office freed, unpaid balance written off"
+          : "Contract closed — office is now available",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Close failed");
     } finally {
@@ -176,7 +218,9 @@ function ContractCard({
           <InvoiceRow
             key={inv.id}
             invoice={inv}
+            payments={payments.filter((p) => p.invoiceId === inv.id)}
             onMarkPaid={onMarkPaid}
+            onRecordPayment={onRecordPayment}
             getReceiptUrl={getReceiptUrl}
           />
         ))}
@@ -224,34 +268,56 @@ function ContractCard({
   );
 }
 
+function checkPdf(file: File): boolean {
+  if (file.type !== "application/pdf") {
+    toast.error("The receipt must be a PDF file");
+    return false;
+  }
+  if (file.size > 1024 * 1024) {
+    toast.error("The receipt must be 1 MB or less");
+    return false;
+  }
+  return true;
+}
+
 function InvoiceRow({
   invoice,
+  payments,
   onMarkPaid,
+  onRecordPayment,
   getReceiptUrl,
 }: {
   invoice: Invoice;
+  payments: Payment[];
   onMarkPaid: (invoiceId: string, receipt: File) => Promise<void>;
-  getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  onRecordPayment: (
+    invoiceId: string,
+    amount: number,
+    receipt: File,
+    note?: string,
+  ) => Promise<void>;
+  getReceiptUrl: (receiptPath: string) => Promise<string | null>;
 }) {
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [showPart, setShowPart] = useState(false);
+  const [amount, setAmount] = useState("");
+  const fullRef = useRef<HTMLInputElement>(null);
+  const partRef = useRef<HTMLInputElement>(null);
 
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+  const paid = invoice.paidAmount || 0;
+  const remaining = Math.max(0, Math.round((invoice.amount - paid) * 1000) / 1000);
+  const isVoid = invoice.status === "void";
+  const isPaid = !isVoid && remaining <= 0.0005;
+  const isPartial = !isVoid && !isPaid && paid > 0;
+
+  async function onFullFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      toast.error("The receipt must be a PDF file");
-      return;
-    }
-    if (file.size > 1024 * 1024) {
-      toast.error("The receipt must be 1 MB or less");
-      return;
-    }
+    if (!file || !checkPdf(file)) return;
     setBusy(true);
     try {
       await onMarkPaid(invoice.id, file);
-      toast.success("Invoice marked paid — receipt uploaded");
+      toast.success("Invoice paid in full — receipt uploaded");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -259,54 +325,171 @@ function InvoiceRow({
     }
   }
 
-  async function viewReceipt() {
-    const url = await getReceiptUrl(invoice.id);
+  async function onPartFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const amt = Math.round(Number(amount) * 1000) / 1000;
+    if (!amt || amt <= 0) {
+      toast.error("Enter a payment amount first");
+      return;
+    }
+    if (amt > remaining + 0.0005) {
+      toast.error(`That's more than the ${remaining.toFixed(3)} BHD still owed`);
+      return;
+    }
+    if (!checkPdf(file)) return;
+    setBusy(true);
+    try {
+      await onRecordPayment(invoice.id, amt, file);
+      toast.success(`Payment of ${bhd(amt)} recorded`);
+      setShowPart(false);
+      setAmount("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function viewReceipt(path?: string) {
+    if (!path) {
+      toast.error("Receipt not found");
+      return;
+    }
+    const url = await getReceiptUrl(path);
     if (url) window.open(url, "_blank");
     else toast.error("Receipt not found");
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 text-sm">
-      <span className="text-muted-foreground">
-        {invoice.periodStart} → {invoice.periodEnd}
-      </span>
-      <span className="flex items-center gap-2">
-        <span className="font-semibold tabular-nums">
-          {invoice.amount.toFixed(3)} BHD
+    <div className="rounded-md border border-border/60 p-2 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground">
+          {invoice.periodStart} → {invoice.periodEnd}
         </span>
-        {invoice.status === "paid" ? (
-          <>
+        <span className="flex items-center gap-2">
+          <span className="font-semibold tabular-nums">
+            {invoice.amount.toFixed(3)} BHD
+          </span>
+          {isPaid ? (
             <Badge
               variant="secondary"
               className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
             >
               Paid
             </Badge>
-            <Button size="sm" variant="ghost" onClick={viewReceipt}>
-              <FileText className="mr-1 size-3.5" /> Receipt
-            </Button>
-          </>
-        ) : (
-          <>
+          ) : isVoid ? (
+            <Badge
+              variant="outline"
+              className="text-muted-foreground line-through"
+            >
+              Written off
+            </Badge>
+          ) : isPartial ? (
+            <Badge
+              variant="outline"
+              className="border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+            >
+              {remaining.toFixed(3)} left
+            </Badge>
+          ) : (
             <Badge variant="outline">Unpaid</Badge>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="application/pdf"
-              className="hidden"
-              onChange={onFile}
-            />
+          )}
+        </span>
+      </div>
+
+      {isPartial && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Paid {paid.toFixed(3)} of {invoice.amount.toFixed(3)} BHD
+        </p>
+      )}
+
+      {payments.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {payments
+            .slice()
+            .sort((a, b) => (a.paidAt < b.paidAt ? -1 : 1))
+            .map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
+              >
+                <span>
+                  <span className="tabular-nums">{p.amount.toFixed(3)} BHD</span>
+                  <span className="ml-2">{fmtDateTime(p.paidAt)}</span>
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2"
+                  onClick={() => viewReceipt(p.receiptPath)}
+                >
+                  <FileText className="mr-1 size-3" /> Receipt
+                </Button>
+              </li>
+            ))}
+        </ul>
+      )}
+
+      {!isPaid && !isVoid && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            ref={fullRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={onFullFile}
+          />
+          <input
+            ref={partRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={onPartFile}
+          />
+          <Button
+            size="sm"
+            disabled={busy}
+            onClick={() => fullRef.current?.click()}
+          >
+            <Upload className="mr-1 size-3.5" />
+            {busy ? "Uploading…" : `Pay ${remaining.toFixed(3)} in full`}
+          </Button>
+          {!showPart ? (
             <Button
               size="sm"
+              variant="outline"
               disabled={busy}
-              onClick={() => inputRef.current?.click()}
+              onClick={() => setShowPart(true)}
             >
-              <Upload className="mr-1 size-3.5" />
-              {busy ? "Uploading…" : "Mark paid (upload receipt)"}
+              Part payment
             </Button>
-          </>
-        )}
-      </span>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <input
+                type="number"
+                inputMode="decimal"
+                step="0.001"
+                min="0"
+                max={remaining}
+                placeholder={remaining.toFixed(3)}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="h-8 w-24 rounded-md border border-input bg-background px-2 text-sm"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => partRef.current?.click()}
+              >
+                <Upload className="mr-1 size-3.5" /> Record (upload receipt)
+              </Button>
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

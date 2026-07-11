@@ -106,11 +106,64 @@ export interface CreateContractInput {
  * Later cycles are issued by the "Run renewals & reminders" check ~30 days
  * before each cycle begins.
  */
+const OCCUPYING_STATUSES = [
+  "reserved",
+  "active",
+  "renewal_await_payment",
+  "expired",
+];
+
+/**
+ * Server-side single-occupancy guard: rejects putting a contract on an office
+ * that has no free slot (single-tenant offices hold one; multi-tenant hold
+ * `capacity`). The screen already hides taken offices, but this stops a race or
+ * a stale view from double-booking and double-billing a room.
+ */
+async function assertOfficeAvailable(
+  supabase: ReturnType<typeof createAdminClient>,
+  floorKey: string | undefined,
+  officeNo: string | undefined,
+  excludeContractId?: string,
+): Promise<void> {
+  if (!floorKey || !officeNo) return;
+  const [cRes, dRes] = await Promise.all([
+    supabase
+      .from("contracts")
+      .select("id, status")
+      .eq("floor_key", floorKey)
+      .eq("office_no", officeNo)
+      .in("status", OCCUPYING_STATUSES),
+    supabase
+      .from("office_details")
+      .select("multi_tenant, capacity")
+      .eq("floor_key", floorKey)
+      .eq("office_no", officeNo)
+      .maybeSingle(),
+  ]);
+  if (cRes.error) throw new Error(cRes.error.message);
+  const det = dRes.data as { multi_tenant?: boolean; capacity?: number } | null;
+  const capacity = det?.multi_tenant
+    ? Math.max(1, Number(det.capacity) || 1)
+    : 1;
+  const used = (cRes.data ?? []).filter(
+    (r) => r.id !== excludeContractId,
+  ).length;
+  if (used >= capacity) {
+    throw new Error(
+      capacity > 1
+        ? `Office ${officeNo} is full (${used}/${capacity} occupied). Pick another office.`
+        : `Office ${officeNo} is already occupied. Free it first, or pick another office.`,
+    );
+  }
+}
+
 export async function createContractAction(
   input: CreateContractInput,
 ): Promise<Contract> {
   const session = await requireSession();
   const supabase = createAdminClient();
+
+  await assertOfficeAvailable(supabase, input.floorKey, input.officeNo);
 
   const discountValue = input.discountValue ?? 0;
   const discountKind = input.discountKind ?? "fixed";
@@ -166,6 +219,7 @@ export async function createContractAction(
       discountValue,
       discountKind,
     ),
+    paidAmount: 0,
     status: "issued",
     issuedAt: now,
   };
@@ -317,6 +371,12 @@ export async function updateContractAction(
       changes.push("client changed");
     }
     if (input.officeNo && input.officeNo !== row.office_no) {
+      await assertOfficeAvailable(
+        supabase,
+        input.floorKey ?? (row.floor_key as string | undefined),
+        input.officeNo,
+        input.contractId,
+      );
       patch.floor_key = input.floorKey ?? row.floor_key;
       patch.office_no = input.officeNo;
       changes.push(`office → ${input.officeNo}`);
@@ -456,6 +516,7 @@ export async function renewContractAction(contractId: string): Promise<void> {
     periodStart: cycle.periodStart,
     periodEnd: cycle.periodEnd,
     amount: cycle.amount,
+    paidAmount: 0,
     status: "issued",
     issuedAt: new Date().toISOString(),
   };
@@ -484,14 +545,23 @@ export async function renewContractAction(contractId: string): Promise<void> {
   });
 }
 
-/** Close a contract → frees the office. Creator staff or an admin only. */
-export async function closeContractAction(contractId: string): Promise<void> {
+/**
+ * Close a contract → frees the office. Creator staff or an admin only.
+ * Any unpaid invoice stays as an outstanding balance UNLESS `writeOffUnpaid`
+ * is set, in which case it's voided (written off). When the client has no other
+ * live contract, their cached office/billing is cleared so a departed tenant
+ * doesn't linger as an active, rent-owing client.
+ */
+export async function closeContractAction(
+  contractId: string,
+  writeOffUnpaid = false,
+): Promise<void> {
   const session = await requireSession();
   const supabase = createAdminClient();
 
   const { data: row, error } = await supabase
     .from("contracts")
-    .select("created_by_staff_id")
+    .select("id, client_id, contract_no, created_by_staff_id")
     .eq("id", contractId)
     .single();
   if (error || !row) throw new Error("Contract not found");
@@ -507,6 +577,51 @@ export async function closeContractAction(contractId: string): Promise<void> {
     .update({ status: "closed" })
     .eq("id", contractId);
   if (cErr) throw new Error(cErr.message);
+
+  if (writeOffUnpaid) {
+    const { error: vErr } = await supabase
+      .from("invoices")
+      .update({ status: "void" })
+      .eq("contract_id", contractId)
+      .eq("status", "issued");
+    if (vErr) throw new Error(vErr.message);
+  }
+
+  const clientId = row.client_id as string;
+  const { data: others } = await supabase
+    .from("contracts")
+    .select("id")
+    .eq("client_id", clientId)
+    .neq("id", contractId)
+    .neq("status", "closed");
+  if (!others || others.length === 0) {
+    await supabase
+      .from("clients")
+      .update({
+        office: "",
+        monthly_rent: null,
+        rent_start: null,
+        rent_end: null,
+        rent_months: null,
+        amount: 0,
+        due_date: null,
+        status: "pending",
+        paid_at: null,
+      })
+      .eq("id", clientId);
+  }
+
+  await supabase.from("activity_log").insert({
+    id: uid(),
+    type: "created",
+    cid: clientId,
+    cname: session.user.name ?? "",
+    description: `Contract ${row.contract_no ?? ""} closed${
+      writeOffUnpaid ? " — unpaid balance written off" : ""
+    }`,
+    amt: null,
+    ts: new Date().toISOString(),
+  });
 }
 
 /**
@@ -514,47 +629,86 @@ export async function closeContractAction(contractId: string): Promise<void> {
  * to the private `receipts` bucket, records it, and activates the contract if
  * it was awaiting payment (reserved / renewal).
  */
-export async function markInvoicePaidAction(formData: FormData): Promise<void> {
-  const session = await requireSession();
-  const supabase = createAdminClient();
-
-  const invoiceId = String(formData.get("invoiceId") || "");
-  const file = formData.get("receipt");
-  if (!invoiceId) throw new Error("Missing invoice");
-  if (!(file instanceof File) || file.size === 0)
-    throw new Error("A receipt PDF is required to mark this paid");
+/**
+ * Records one receipt against an invoice. `requestedAmount === null` pays the
+ * full remaining balance (the "mark paid" path); a number records a partial
+ * payment. The invoice becomes `partial` until fully covered, then `paid` — at
+ * which point the contract activates and the client bridge flips to paid.
+ */
+async function applyPayment(
+  supabase: ReturnType<typeof createAdminClient>,
+  session: Awaited<ReturnType<typeof requireSession>>,
+  invoiceId: string,
+  requestedAmount: number | null,
+  file: File,
+  note?: string,
+): Promise<void> {
   if (file.type !== "application/pdf")
     throw new Error("The receipt must be a PDF file");
   if (file.size > 1024 * 1024)
     throw new Error("The receipt must be 1 MB or less");
 
-  const path = `${invoiceId}.pdf`;
+  const { data: inv, error: iErr } = await supabase
+    .from("invoices")
+    .select("id, contract_id, amount, paid_amount, status")
+    .eq("id", invoiceId)
+    .single();
+  if (iErr || !inv) throw new Error("Invoice not found");
+  if (inv.status === "void") throw new Error("This invoice was written off");
+
+  const total = Number(inv.amount) || 0;
+  const already = Number(inv.paid_amount) || 0;
+  const remaining = Math.round((total - already) * 1000) / 1000;
+  if (remaining <= 0.0005) throw new Error("This invoice is already fully paid");
+
+  const amount =
+    requestedAmount == null ? remaining : Math.round(requestedAmount * 1000) / 1000;
+  if (amount <= 0) throw new Error("Enter a payment amount greater than zero");
+  if (amount > remaining + 0.0005)
+    throw new Error(
+      `That's more than the ${remaining.toFixed(3)} BHD still owed on this invoice`,
+    );
+
+  const paymentId = uid();
+  const path = `${invoiceId}/${paymentId}.pdf`;
   const { error: upErr } = await supabase.storage
     .from("receipts")
     .upload(path, file, { upsert: true, contentType: "application/pdf" });
   if (upErr) throw new Error(upErr.message);
 
-  const { data: inv, error: iErr } = await supabase
+  const now = new Date().toISOString();
+  const { error: pErr } = await supabase.from("payments").insert({
+    id: paymentId,
+    invoice_id: invoiceId,
+    amount,
+    paid_at: now,
+    paid_by_staff_id: session.user.id,
+    receipt_path: path,
+    note: note ?? null,
+  });
+  if (pErr) throw new Error(pErr.message);
+
+  const newPaid = Math.round((already + amount) * 1000) / 1000;
+  const fullyPaid = newPaid >= total - 0.0005;
+  const { error: uErr } = await supabase
     .from("invoices")
     .update({
-      status: "paid",
-      paid_at: new Date().toISOString(),
+      paid_amount: newPaid,
+      status: fullyPaid ? "paid" : "partial",
+      paid_at: fullyPaid ? now : null,
       paid_by_staff_id: session.user.id,
       receipt_path: path,
     })
-    .eq("id", invoiceId)
-    .select("contract_id")
-    .single();
-  if (iErr) throw new Error(iErr.message);
+    .eq("id", invoiceId);
+  if (uErr) throw new Error(uErr.message);
 
-  if (inv?.contract_id) {
+  if (fullyPaid && inv.contract_id) {
     await supabase
       .from("contracts")
       .update({ status: "active" })
       .eq("id", inv.contract_id)
       .in("status", ["reserved", "renewal_await_payment"]);
 
-    // bridge: reflect the payment on the client record too
     const { data: contract } = await supabase
       .from("contracts")
       .select("client_id")
@@ -563,21 +717,48 @@ export async function markInvoicePaidAction(formData: FormData): Promise<void> {
     if (contract?.client_id) {
       await supabase
         .from("clients")
-        .update({ status: "paid", paid_at: new Date().toISOString() })
+        .update({ status: "paid", paid_at: now })
         .eq("id", contract.client_id);
     }
   }
 }
 
+export async function markInvoicePaidAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const supabase = createAdminClient();
+  const invoiceId = String(formData.get("invoiceId") || "");
+  const file = formData.get("receipt");
+  if (!invoiceId) throw new Error("Missing invoice");
+  if (!(file instanceof File) || file.size === 0)
+    throw new Error("A receipt PDF is required to mark this paid");
+  await applyPayment(supabase, session, invoiceId, null, file);
+}
+
+export async function recordPaymentAction(formData: FormData): Promise<void> {
+  const session = await requireSession();
+  const supabase = createAdminClient();
+  const invoiceId = String(formData.get("invoiceId") || "");
+  const amount = Number(formData.get("amount") || 0);
+  const note = String(formData.get("note") || "").trim() || undefined;
+  const file = formData.get("receipt");
+  if (!invoiceId) throw new Error("Missing invoice");
+  if (!(file instanceof File) || file.size === 0)
+    throw new Error("A receipt PDF is required");
+  await applyPayment(supabase, session, invoiceId, amount, file, note);
+}
+
 /** Short-lived signed URL to view/download a receipt. */
 export async function getReceiptUrlAction(
-  invoiceId: string,
+  receiptPath: string,
 ): Promise<string | null> {
   await requireSession();
+  if (!receiptPath) return null;
   const supabase = createAdminClient();
+  // Legacy invoices stored their receipt as "{invoiceId}.pdf"; payments store
+  // "{invoiceId}/{paymentId}.pdf". Either way we sign the stored path directly.
   const { data, error } = await supabase.storage
     .from("receipts")
-    .createSignedUrl(`${invoiceId}.pdf`, 120);
+    .createSignedUrl(receiptPath, 120);
   if (error) return null;
   return data?.signedUrl ?? null;
 }
@@ -598,9 +779,16 @@ export interface ChecksSummary {
  * "Already reminded" is tracked in crm_settings keyed by contract+end date, so
  * renewals (new end date) naturally re-trigger. No cron required — run on demand.
  */
-export async function runContractChecksAction(): Promise<ChecksSummary> {
-  const session = await requireSession();
-  if (session.user.role !== "admin") throw new Error("Admin only");
+export async function runContractChecksAction(
+  cronToken?: string,
+): Promise<ChecksSummary> {
+  // Authorized either by an admin session (the "Run checks" button) or by the
+  // scheduled cron passing the shared secret (see /api/cron/checks).
+  const secret = process.env.CRON_SECRET;
+  if (!(cronToken && secret && cronToken === secret)) {
+    const session = await requireSession();
+    if (session.user.role !== "admin") throw new Error("Admin only");
+  }
   const supabase = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();
@@ -712,45 +900,57 @@ export async function runContractChecksAction(): Promise<ChecksSummary> {
   }
   for (const c of contracts) {
     if (c.status !== "active") continue;
-    const lastEnd = latestEndByContract.get(c.id) ?? c.startDate;
-    const cycle = nextCycle(c, lastEnd);
-    if (!cycle) continue; // term fully invoiced
-    if (daysUntil(cycle.periodStart, today) > 30) continue; // not due yet
-    await supabase.from("invoices").insert(
-      invoiceToRow({
-        id: uid(),
-        contractId: c.id,
+    let lastEnd = latestEndByContract.get(c.id) ?? c.startDate;
+    // Issue EVERY cycle that has already started or begins within 30 days, not
+    // just the next one — so a contract that fell several cycles behind is
+    // fully caught up in a single run. Bounded by the term (nextCycle → null).
+    for (let guard = 0; guard < 120; guard++) {
+      const cycle = nextCycle(c, lastEnd);
+      if (!cycle) break; // term fully invoiced
+      if (daysUntil(cycle.periodStart, today) > 30) break; // not due yet
+      await supabase.from("invoices").insert(
+        invoiceToRow({
+          id: uid(),
+          contractId: c.id,
+          periodStart: cycle.periodStart,
+          periodEnd: cycle.periodEnd,
+          amount: cycle.amount,
+          status: "issued",
+          issuedAt: now,
+        }),
+      );
+      await syncClientBilling(supabase, {
+        clientId: c.clientId,
+        monthlyRent: c.monthlyRent,
+        months: cycle.months,
         periodStart: cycle.periodStart,
         periodEnd: cycle.periodEnd,
         amount: cycle.amount,
-        status: "issued",
-        issuedAt: now,
-      }),
-    );
-    await syncClientBilling(supabase, {
-      clientId: c.clientId,
-      monthlyRent: c.monthlyRent,
-      months: cycle.months,
-      periodStart: cycle.periodStart,
-      periodEnd: cycle.periodEnd,
-      amount: cycle.amount,
-    });
-    summary.cyclesInvoiced++;
-    const cl = clientById.get(c.clientId);
-    const st = c.createdByStaffId ? staffById.get(c.createdByStaffId) : undefined;
-    await send(
-      cl?.email,
-      `Invoice for Office ${c.officeNo} — next rent period`,
-      `Dear ${nameOf(c.clientId)},\n\nYour next rent period for Office ${c.officeNo} (contract ${c.contractNo}) runs ${cycle.periodStart} to ${cycle.periodEnd}.\n\nAmount: ${cycle.amount.toFixed(3)} BHD, payable in advance by ${cycle.periodStart}. Kindly arrange the transfer and send us the receipt.\n\nSpace IN Business Center`,
-    );
-    await send(
-      st?.email,
-      `Cycle invoice issued — ${c.contractNo} (Office ${c.officeNo})`,
-      `Next payment cycle invoiced for ${nameOf(c.clientId)}: ${cycle.periodStart} → ${cycle.periodEnd}, ${cycle.amount.toFixed(3)} BHD, due ${cycle.periodStart}.`,
-    );
-    summary.details.push(
-      `Cycle invoiced ${c.contractNo} (${cycle.periodStart} → ${cycle.periodEnd})`,
-    );
+      });
+      summary.cyclesInvoiced++;
+      summary.details.push(
+        `Cycle invoiced ${c.contractNo} (${cycle.periodStart} → ${cycle.periodEnd})`,
+      );
+      // Email only for the upcoming cycle; silently backfill already-started
+      // (overdue) cycles so a catch-up run doesn't flood the tenant.
+      if (daysUntil(cycle.periodStart, today) >= 0) {
+        const cl = clientById.get(c.clientId);
+        const st = c.createdByStaffId
+          ? staffById.get(c.createdByStaffId)
+          : undefined;
+        await send(
+          cl?.email,
+          `Invoice for Office ${c.officeNo} — next rent period`,
+          `Dear ${nameOf(c.clientId)},\n\nYour next rent period for Office ${c.officeNo} (contract ${c.contractNo}) runs ${cycle.periodStart} to ${cycle.periodEnd}.\n\nAmount: ${cycle.amount.toFixed(3)} BHD, payable in advance by ${cycle.periodStart}. Kindly arrange the transfer and send us the receipt.\n\nSpace IN Business Center`,
+        );
+        await send(
+          st?.email,
+          `Cycle invoice issued — ${c.contractNo} (Office ${c.officeNo})`,
+          `Next payment cycle invoiced for ${nameOf(c.clientId)}: ${cycle.periodStart} → ${cycle.periodEnd}, ${cycle.amount.toFixed(3)} BHD, due ${cycle.periodStart}.`,
+        );
+      }
+      lastEnd = cycle.periodEnd; // advance so the next iteration chains forward
+    }
   }
 
   for (const c of dueExpiry) {

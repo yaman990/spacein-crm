@@ -15,17 +15,17 @@ import {
 } from "recharts";
 import { useCrm } from "@/providers/crm-provider";
 import {
-  contractsExpiringSoon,
   durationMix,
   employeeLeaderboard,
+  leasesExpiringSoon,
   revenueByMonth,
   statusBreakdown,
   timelineBuckets,
   topClientsByAmount,
 } from "@/lib/analytics";
 import { contractOfficeStats, officeDetailsMap } from "@/lib/office-contracts";
+import { daysUntil } from "@/lib/contract-checks";
 import { bhd, fmtDate } from "@/lib/format";
-import { statusOf } from "@/lib/client-status";
 import { PageHeader } from "@/components/layout/page-header";
 import { ChartCard } from "@/components/charts/chart-card";
 import { ChartLegend } from "@/components/charts/chart-legend";
@@ -38,7 +38,6 @@ import {
 } from "@/components/charts/chart-theme";
 import { useChartTheme } from "@/components/charts/use-chart-theme";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ClientStatusBadge } from "@/components/clients/client-status-badge";
 import { Badge } from "@/components/ui/badge";
 
 function truncateLabel(value: string, max = 18) {
@@ -47,10 +46,15 @@ function truncateLabel(value: string, max = 18) {
 
 export default function AnalyticsPage() {
   const palette = useChartTheme();
-  const { clients, floors, officeOverrides, contracts, officeDetails } =
+  const { clients, floors, officeOverrides, contracts, invoices, officeDetails } =
     useCrm();
+  const today = new Date().toISOString().slice(0, 10);
 
-  const revenue = useMemo(() => revenueByMonth(clients), [clients]);
+  const revenue = useMemo(() => revenueByMonth(invoices), [invoices]);
+  const clientById = useMemo(
+    () => new Map(clients.map((c) => [c.id, c])),
+    [clients],
+  );
   const statusData = useMemo(() => statusBreakdown(clients), [clients]);
   const timeline = useMemo(() => timelineBuckets(clients), [clients]);
   const duration = useMemo(() => durationMix(clients), [clients]);
@@ -85,8 +89,8 @@ export default function AnalyticsPage() {
     [clients],
   );
   const expiring = useMemo(
-    () => contractsExpiringSoon(clients, 30),
-    [clients],
+    () => leasesExpiringSoon(contracts, today, 30),
+    [contracts, today],
   );
 
   const statusTotal = statusData.reduce((sum, d) => sum + d.value, 0);
@@ -106,8 +110,8 @@ export default function AnalyticsPage() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <ChartCard
-          title="Revenue by Due Month"
-          subtitle="Last 12 months"
+          title="Revenue by Month"
+          subtitle="Billed per cycle · last 12 months"
           className="lg:col-span-2"
         >
           <ResponsiveContainer width="100%" height={240}>
@@ -496,41 +500,49 @@ export default function AnalyticsPage() {
         <CardHeader className="border-b">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold">
-              Contracts Expiring in 30 Days
+              Leases Expiring in 30 Days
             </CardTitle>
             <Badge variant="secondary">
-              {expiring.length} client{expiring.length !== 1 ? "s" : ""}
+              {expiring.length} lease{expiring.length !== 1 ? "s" : ""}
             </Badge>
           </div>
         </CardHeader>
         <CardContent className="max-h-80 space-y-2 overflow-y-auto p-4">
           {expiring.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No contracts expiring in the next 30 days
+              No leases ending in the next 30 days
             </p>
           ) : (
-            expiring.map((c) => (
-              <div
-                key={c.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 p-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{c.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {c.company || "—"} · Office #{c.office || "—"}
-                  </p>
+            expiring.map((c) => {
+              const cl = clientById.get(c.clientId);
+              const days = daysUntil(c.endDate, today);
+              return (
+                <div
+                  key={c.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 p-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {cl?.company || cl?.name || "—"}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      Office #{c.officeNo || "—"} · {c.contractNo}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      ends {fmtDate(c.endDate)}
+                    </span>
+                    <Badge variant="outline" className="text-[0.65rem]">
+                      {days}d
+                    </Badge>
+                    <span className="font-mono text-sm font-semibold tabular-nums">
+                      {bhd(c.monthlyRent)}/mo
+                    </span>
+                  </div>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {fmtDate(c.dueDate)}
-                  </span>
-                  <ClientStatusBadge status={statusOf(c)} />
-                  <span className="font-mono text-sm font-semibold tabular-nums">
-                    {bhd(c.amount)}
-                  </span>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </CardContent>
       </Card>

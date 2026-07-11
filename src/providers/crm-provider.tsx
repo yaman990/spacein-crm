@@ -27,6 +27,7 @@ import {
   createContractAction,
   getReceiptUrlAction,
   markInvoicePaidAction,
+  recordPaymentAction,
   renewContractAction,
   runContractChecksAction,
   saveBuildingAction,
@@ -37,6 +38,7 @@ import {
   type UpdateContractInput,
 } from "@/actions/contracts";
 import { statusOf } from "@/lib/client-status";
+import { portfolioTotals } from "@/lib/billing-metrics";
 import type { ActivityLogEntry } from "@/types/activity";
 import type { Client, ClientInput, ClientType } from "@/types/client";
 import type { FloorsMap, OfficeOverrides } from "@/types/office";
@@ -45,6 +47,7 @@ import type {
   Contract,
   Invoice,
   OfficeDetails,
+  Payment,
 } from "@/types/contract";
 
 export interface CrmSnapshot {
@@ -54,6 +57,7 @@ export interface CrmSnapshot {
   floors: FloorsMap;
   contracts: Contract[];
   invoices: Invoice[];
+  payments: Payment[];
   officeDetails: OfficeDetails[];
   building: Building | null;
 }
@@ -88,9 +92,15 @@ interface CrmContextValue extends CrmSnapshot {
   saveOfficeDetails: (details: OfficeDetails) => Promise<void>;
   saveBuilding: (building: Omit<Building, "id"> & { id?: string }) => Promise<void>;
   markInvoicePaid: (invoiceId: string, receipt: File) => Promise<void>;
-  getReceiptUrl: (invoiceId: string) => Promise<string | null>;
+  recordPayment: (
+    invoiceId: string,
+    amount: number,
+    receipt: File,
+    note?: string,
+  ) => Promise<void>;
+  getReceiptUrl: (receiptPath: string) => Promise<string | null>;
   renewContract: (contractId: string) => Promise<void>;
-  closeContract: (contractId: string) => Promise<void>;
+  closeContract: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
   updateContract: (input: UpdateContractInput) => Promise<void>;
   runContractChecks: () => Promise<ChecksSummary>;
 }
@@ -112,6 +122,7 @@ export function CrmProvider({
   const [floors, setFloors] = useState(initialData.floors);
   const [contracts, setContracts] = useState(initialData.contracts);
   const [invoices, setInvoices] = useState(initialData.invoices);
+  const [payments, setPayments] = useState(initialData.payments);
   const [officeDetails, setOfficeDetails] = useState(initialData.officeDetails);
   const [building, setBuilding] = useState(initialData.building);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -126,6 +137,7 @@ export function CrmProvider({
       setFloors(data.floors);
       setContracts(data.contracts);
       setInvoices(data.invoices);
+      setPayments(data.payments);
       setOfficeDetails(data.officeDetails);
       setBuilding(data.building);
     } catch (err) {
@@ -272,6 +284,19 @@ export function CrmProvider({
     [refresh],
   );
 
+  const recordPayment = useCallback(
+    async (invoiceId: string, amount: number, receipt: File, note?: string) => {
+      const fd = new FormData();
+      fd.set("invoiceId", invoiceId);
+      fd.set("amount", String(amount));
+      fd.set("receipt", receipt);
+      if (note) fd.set("note", note);
+      await recordPaymentAction(fd);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const getReceiptUrl = useCallback(
     (invoiceId: string) => getReceiptUrlAction(invoiceId),
     [],
@@ -286,8 +311,8 @@ export function CrmProvider({
   );
 
   const closeContract = useCallback(
-    async (contractId: string) => {
-      await closeContractAction(contractId);
+    async (contractId: string, writeOffUnpaid = false) => {
+      await closeContractAction(contractId, writeOffUnpaid);
       await refresh();
     },
     [refresh],
@@ -315,6 +340,7 @@ export function CrmProvider({
       floors,
       contracts,
       invoices,
+      payments,
       officeDetails,
       building,
       isHydrated: true,
@@ -335,6 +361,7 @@ export function CrmProvider({
       saveOfficeDetails,
       saveBuilding,
       markInvoicePaid,
+      recordPayment,
       getReceiptUrl,
       renewContract,
       closeContract,
@@ -348,6 +375,7 @@ export function CrmProvider({
       floors,
       contracts,
       invoices,
+      payments,
       officeDetails,
       building,
       isSyncing,
@@ -367,6 +395,7 @@ export function CrmProvider({
       saveOfficeDetails,
       saveBuilding,
       markInvoicePaid,
+      recordPayment,
       getReceiptUrl,
       renewContract,
       closeContract,
@@ -417,6 +446,7 @@ export function useOffices() {
     officeOverrides,
     contracts,
     invoices,
+    payments,
     officeDetails,
     building,
     isHydrated,
@@ -429,6 +459,7 @@ export function useOffices() {
     saveOfficeDetails,
     saveBuilding,
     markInvoicePaid,
+    recordPayment,
     getReceiptUrl,
     renewContract,
     closeContract,
@@ -441,6 +472,7 @@ export function useOffices() {
     officeOverrides,
     contracts,
     invoices,
+    payments,
     officeDetails,
     building,
     isHydrated,
@@ -453,6 +485,7 @@ export function useOffices() {
     saveOfficeDetails,
     saveBuilding,
     markInvoicePaid,
+    recordPayment,
     getReceiptUrl,
     renewContract,
     closeContract,
@@ -462,8 +495,26 @@ export function useOffices() {
 }
 
 export function useContracts() {
-  const { contracts, invoices, clients, isHydrated, isSyncing } = useCrm();
-  return { contracts, invoices, clients, isHydrated, isSyncing };
+  const {
+    contracts,
+    invoices,
+    payments,
+    clients,
+    isHydrated,
+    isSyncing,
+    recordPayment,
+    getReceiptUrl,
+  } = useCrm();
+  return {
+    contracts,
+    invoices,
+    payments,
+    clients,
+    isHydrated,
+    isSyncing,
+    recordPayment,
+    getReceiptUrl,
+  };
 }
 
 /**
@@ -486,6 +537,7 @@ export function buildClientFromForm(values: {
   rentedBy: string;
   notes: string;
   crExpiry: string;
+  crStatus?: string;
 }): ClientInput {
   return {
     name: values.name.trim(),
@@ -506,11 +558,12 @@ export function buildClientFromForm(values: {
     rentedBy: values.rentedBy.trim(),
     notes: values.notes.trim(),
     crExpiry: values.crExpiry,
+    crStatus: values.crStatus,
   };
 }
 
 export function useClientStats() {
-  const { clients } = useCrm();
+  const { clients, contracts, invoices } = useCrm();
   return useMemo(() => {
     const total = clients.length;
     const pending = clients.filter((c) =>
@@ -518,25 +571,20 @@ export function useClientStats() {
     ).length;
     const overdue = clients.filter((c) => statusOf(c) === "overdue").length;
     const paid = clients.filter((c) => statusOf(c) === "paid").length;
-    const collected = clients
-      .filter((c) => statusOf(c) === "paid")
-      .reduce((s, c) => s + Number(c.amount || 0), 0);
-    const portfolio = clients.reduce((s, c) => s + Number(c.amount || 0), 0);
-    const outstanding = clients
-      .filter((c) => ["pending", "sent"].includes(statusOf(c)))
-      .reduce((s, c) => s + Number(c.amount || 0), 0);
-    const overdueAmount = clients
-      .filter((c) => statusOf(c) === "overdue")
-      .reduce((s, c) => s + Number(c.amount || 0), 0);
+    // Money comes from the full invoice history, not the cached client field,
+    // so totals reflect every cycle rather than one collapsed invoice.
+    const today = new Date().toISOString().slice(0, 10);
+    const money = portfolioTotals(contracts, invoices, today);
     return {
       total,
       pending,
       overdue,
       paid,
-      collected,
-      portfolio,
-      outstanding,
-      overdueAmount,
+      collected: money.collected,
+      portfolio: money.portfolio,
+      outstanding: money.outstanding,
+      overdueAmount: money.overdue,
+      mrr: money.mrr,
     };
-  }, [clients]);
+  }, [clients, contracts, invoices]);
 }

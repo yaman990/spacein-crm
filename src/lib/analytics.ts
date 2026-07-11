@@ -1,5 +1,7 @@
 import { statusOf } from "@/lib/client-status";
+import { daysUntil } from "@/lib/contract-checks";
 import type { Client } from "@/types/client";
+import type { Contract, Invoice } from "@/types/contract";
 import type { FloorsMap, OfficeOverrides } from "@/types/office";
 
 const MONTHS = [
@@ -18,12 +20,14 @@ const MONTHS = [
   "Dec",
 ];
 
-export function revenueByMonth(clients: Client[]) {
+export function revenueByMonth(invoices: Invoice[]) {
   const months: Record<string, number> = {};
-  clients.forEach((c) => {
-    if (!c.dueDate) return;
-    const m = c.dueDate.slice(0, 7);
-    months[m] = (months[m] || 0) + Number(c.amount || 0);
+  invoices.forEach((inv) => {
+    if (inv.status === "void") return; // written off — not revenue
+    // Billed revenue by the month the cycle covers — every invoice, paid or not.
+    const key = (inv.periodStart || inv.issuedAt || "").slice(0, 7);
+    if (!key) return;
+    months[key] = (months[key] || 0) + Number(inv.amount || 0);
   });
   const keys = Object.keys(months).sort();
   const displayKeys = keys.length > 14 ? keys.slice(-14) : keys;
@@ -171,16 +175,21 @@ export function employeeLeaderboard(clients: Client[]) {
     .sort((a, b) => b.revenue - a.revenue);
 }
 
-export function contractsExpiringSoon(clients: Client[], days = 30) {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const end = new Date(now);
-  end.setDate(end.getDate() + days);
-  return clients
+/**
+ * Contracts whose LEASE (not payment cycle) ends within `days`. Keyed off the
+ * contract's real end date — this is the renewal pipeline, distinct from the
+ * "payments due" list.
+ */
+export function leasesExpiringSoon(
+  contracts: Contract[],
+  todayISO: string,
+  days = 30,
+): Contract[] {
+  return contracts
     .filter((c) => {
-      if (!c.dueDate || statusOf(c) === "paid") return false;
-      const d = new Date(c.dueDate + "T00:00:00");
-      return d >= now && d <= end;
+      if (c.status !== "active" || !c.endDate) return false;
+      const d = daysUntil(c.endDate, todayISO);
+      return d >= 0 && d <= days;
     })
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    .sort((a, b) => a.endDate.localeCompare(b.endDate));
 }

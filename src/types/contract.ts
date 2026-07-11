@@ -43,7 +43,7 @@ export interface Contract {
   createdAt: string;
 }
 
-export type InvoiceStatus = "issued" | "paid";
+export type InvoiceStatus = "issued" | "paid" | "partial" | "void";
 
 export interface Invoice {
   id: string;
@@ -51,11 +51,24 @@ export interface Invoice {
   periodStart: string;
   periodEnd: string;
   amount: number;
+  /** How much has been received so far (0 … amount). */
+  paidAmount: number;
   status: InvoiceStatus;
   issuedAt: string;
   paidAt?: string;
   paidByStaffId?: string;
   receiptPath?: string;
+}
+
+/** One receipt against an invoice — invoices can have several (partial pay). */
+export interface Payment {
+  id: string;
+  invoiceId: string;
+  amount: number;
+  paidAt: string;
+  paidByStaffId?: string;
+  receiptPath?: string;
+  note?: string;
 }
 
 export interface OfficeDetails {

@@ -6,6 +6,7 @@ import type {
   Contract,
   Invoice,
   OfficeDetails,
+  Payment,
 } from "@/types/contract";
 
 export interface ClientRow {
@@ -247,6 +248,7 @@ export interface InvoiceRow {
   period_start: string | null;
   period_end: string | null;
   amount: number;
+  paid_amount?: number | null;
   status: string;
   issued_at: string;
   paid_at: string | null;
@@ -261,6 +263,7 @@ export function rowToInvoice(row: InvoiceRow): Invoice {
     periodStart: row.period_start ?? "",
     periodEnd: row.period_end ?? "",
     amount: Number(row.amount ?? 0),
+    paidAmount: Number(row.paid_amount ?? 0),
     status: row.status as Invoice["status"],
     issuedAt: row.issued_at,
     paidAt: row.paid_at ?? undefined,
@@ -270,7 +273,7 @@ export function rowToInvoice(row: InvoiceRow): Invoice {
 }
 
 export function invoiceToRow(
-  inv: Invoice,
+  inv: Omit<Invoice, "paidAmount"> & { paidAmount?: number },
 ): Omit<InvoiceRow, "issued_at"> & { issued_at?: string } {
   return {
     id: inv.id,
@@ -278,10 +281,33 @@ export function invoiceToRow(
     period_start: emptyToNull(inv.periodStart),
     period_end: emptyToNull(inv.periodEnd),
     amount: Number(inv.amount ?? 0),
+    paid_amount: Number(inv.paidAmount ?? 0),
     status: inv.status,
     paid_at: inv.paidAt ?? null,
     paid_by_staff_id: inv.paidByStaffId ?? null,
     receipt_path: inv.receiptPath ?? null,
+  };
+}
+
+export interface PaymentRow {
+  id: string;
+  invoice_id: string;
+  amount: number;
+  paid_at: string;
+  paid_by_staff_id: string | null;
+  receipt_path: string | null;
+  note: string | null;
+}
+
+export function rowToPayment(row: PaymentRow): Payment {
+  return {
+    id: row.id,
+    invoiceId: row.invoice_id,
+    amount: Number(row.amount ?? 0),
+    paidAt: row.paid_at,
+    paidByStaffId: row.paid_by_staff_id ?? undefined,
+    receiptPath: row.receipt_path ?? undefined,
+    note: row.note ?? undefined,
   };
 }
 

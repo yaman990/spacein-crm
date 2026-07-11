@@ -41,10 +41,20 @@ export function todayFormatted(): string {
   });
 }
 
+/**
+ * Adds calendar months to an ISO date, clamping to the end of the target month
+ * (31 Jan + 1mo → 28/29 Feb, not 2/3 Mar) and computed purely from the date
+ * parts so it never drifts with the server timezone.
+ */
 export function addMonths(dateStr: string, months: number): string {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setMonth(d.getMonth() + months);
-  return d.toISOString().slice(0, 10);
+  const [y, m, day] = dateStr.slice(0, 10).split("-").map(Number);
+  const total = m - 1 + months; // 0-based month index from year start
+  const ny = y + Math.floor(total / 12);
+  const nm = ((total % 12) + 12) % 12; // 0-based target month
+  const lastDay = new Date(Date.UTC(ny, nm + 1, 0)).getUTCDate();
+  const nd = Math.min(day, lastDay);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${ny}-${p(nm + 1)}-${p(nd)}`;
 }
 
 export function uid(): string {

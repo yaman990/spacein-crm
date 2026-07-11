@@ -2,8 +2,13 @@
 
 import { useMemo, useState } from "react";
 import type { Client } from "@/types/client";
-import { useClients } from "@/providers/crm-provider";
+import { useClients, useContracts } from "@/providers/crm-provider";
 import { daysUntilDue, statusOf } from "@/lib/client-status";
+import {
+  arrangeClients,
+  buildLeaseIndex,
+  type ArrangeFilter,
+} from "@/lib/client-arrange";
 import { bhd, fmtDate } from "@/lib/format";
 import {
   sortClientsByColumn,
@@ -12,6 +17,7 @@ import {
 import { useTableSort } from "@/hooks/use-table-sort";
 import { ClientRowActions } from "@/components/clients/client-row-actions";
 import { ClientStatusBadge } from "@/components/clients/client-status-badge";
+import { ArrangeFilterSelect } from "@/components/clients/arrange-filter";
 import { RentedByTag } from "@/components/clients/rented-by-tag";
 import { DueBadge } from "@/components/clients/due-badge";
 import { Input } from "@/components/ui/input";
@@ -26,42 +32,20 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-type Filter = "all" | "overdue" | "pending" | "paid";
-type InvoiceFilter = "all" | "subscription" | "rent";
 
 export function ClientTable() {
   const { clients, isHydrated } = useClients();
+  const { contracts } = useContracts();
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
-  const [invoiceFilter, setInvoiceFilter] = useState<InvoiceFilter>("all");
+  const [filter, setFilter] = useState<ArrangeFilter>("all");
   const { sortKey, direction, toggleSort } = useTableSort<ClientSortKey>(
     "priority",
     "asc",
   );
 
+  const leaseIndex = useMemo(() => buildLeaseIndex(contracts), [contracts]);
   const filtered = useMemo(() => {
-    let list = [...clients];
-    if (filter === "overdue")
-      list = list.filter((c) => statusOf(c) === "overdue");
-    else if (filter === "pending")
-      list = list.filter((c) =>
-        ["pending", "sent"].includes(statusOf(c)),
-      );
-    else if (filter === "paid")
-      list = list.filter((c) => statusOf(c) === "paid");
-
-    if (invoiceFilter !== "all") {
-      list = list.filter((c) => c.invoiceType === invoiceFilter);
-    }
+    let list = arrangeClients(clients, filter, leaseIndex);
 
     const q = search.toLowerCase();
     if (q) {
@@ -75,7 +59,7 @@ export function ClientTable() {
       );
     }
     return sortClientsByColumn(list, sortKey, direction);
-  }, [clients, filter, invoiceFilter, search, sortKey, direction]);
+  }, [clients, filter, leaseIndex, search, sortKey, direction]);
 
   if (!isHydrated) {
     return (
@@ -89,38 +73,13 @@ export function ClientTable() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <Tabs
-          value={filter}
-          onValueChange={(v) => setFilter(v as Filter)}
-        >
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="overdue">Overdue</TabsTrigger>
-            <TabsTrigger value="pending">Pending</TabsTrigger>
-            <TabsTrigger value="paid">Paid</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Select
-            value={invoiceFilter}
-            onValueChange={(v) => setInvoiceFilter(v as InvoiceFilter)}
-          >
-            <SelectTrigger className="w-full sm:w-40">
-              <SelectValue placeholder="Invoice type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All types</SelectItem>
-              <SelectItem value="subscription">Subscription</SelectItem>
-              <SelectItem value="rent">Rent</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
-            placeholder="Search clients…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full sm:max-w-xs"
-          />
-        </div>
+        <ArrangeFilterSelect value={filter} onChange={setFilter} />
+        <Input
+          placeholder="Search clients…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full sm:max-w-xs"
+        />
       </div>
 
       <p className="text-sm text-muted-foreground">

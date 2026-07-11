@@ -29,6 +29,7 @@ export function RevenueTicker() {
           </p>
         </div>
         <div className="flex flex-wrap gap-6">
+          <TickerStat label="Monthly Rent" value={bhd(stats.mrr)} />
           <TickerStat label="Collected" value={bhd(stats.collected)} />
           <TickerStat label="Outstanding" value={bhd(stats.outstanding)} />
           <TickerStat label="Overdue Risk" value={bhd(stats.overdueAmount)} />

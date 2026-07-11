@@ -1,3 +1,4 @@
+import { summarizeClientBilling } from "@/lib/billing-metrics";
 import type { Client } from "@/types/client";
 import type { Contract, Invoice } from "@/types/contract";
 
@@ -10,9 +11,11 @@ import type { Contract, Invoice } from "@/types/contract";
  *
  * Rules:
  * - Rent is paid IN ADVANCE: each cycle invoice is due on its period START
- *   date. The headline amount/due date come from the most urgent open
- *   invoice (earliest period start). Status stays "sent" if staff already
- *   sent the invoice, otherwise "pending" (overdue computes at read time).
+ *   date. `amount` is the client's TOTAL outstanding across every open invoice
+ *   on all their live contracts, and `dueDate` is the earliest one — so a
+ *   tenant with two offices, or several cycles behind, reads correctly. Status
+ *   stays "sent" if staff already sent the invoice, otherwise "pending"
+ *   (overdue computes at read time from dueDate).
  * - If every invoice is paid, the latest paid invoice drives amount/paid-at
  *   and the status is "paid".
  */
@@ -23,57 +26,38 @@ export function overlayClientBilling(
 ): Client[] {
   if (contracts.length === 0) return clients;
 
-  const liveByClient = new Map<string, Contract[]>();
-  for (const c of contracts) {
-    if (c.status === "closed") continue;
-    const list = liveByClient.get(c.clientId);
-    if (list) list.push(c);
-    else liveByClient.set(c.clientId, [c]);
-  }
-  const invoicesByContract = new Map<string, Invoice[]>();
-  for (const inv of invoices) {
-    const list = invoicesByContract.get(inv.contractId);
-    if (list) list.push(inv);
-    else invoicesByContract.set(inv.contractId, [inv]);
-  }
+  const summary = summarizeClientBilling(contracts, invoices);
 
   return clients.map((client) => {
-    const live = liveByClient.get(client.id);
-    if (!live || live.length === 0) return client;
+    const s = summary.get(client.id);
+    if (!s) return client; // no live contract → keep stored legacy values
 
-    let open: { inv: Invoice; contract: Contract } | null = null;
-    let lastPaid: { inv: Invoice; contract: Contract } | null = null;
-    for (const contract of live) {
-      for (const inv of invoicesByContract.get(contract.id) ?? []) {
-        if (inv.status === "issued") {
-          if (!open || inv.periodStart < open.inv.periodStart)
-            open = { inv, contract };
-        } else if (!lastPaid || inv.periodEnd > lastPaid.inv.periodEnd) {
-          lastPaid = { inv, contract };
-        }
-      }
+    if (s.openCount > 0) {
+      return {
+        ...client,
+        office: s.office,
+        invoiceType: "rent" as const,
+        amount: s.outstanding,
+        dueDate: s.earliestDue,
+        monthlyRent: s.monthlyRent,
+        rentStart: s.rentStart,
+        rentEnd: s.rentEnd,
+        rentMonths: s.months,
+        status: client.status === "sent" ? ("sent" as const) : ("pending" as const),
+        paidAt: undefined,
+      };
     }
-    const current = open ?? lastPaid;
-    if (!current) return client;
-
-    const { inv, contract } = current;
+    // everything paid — show the last settled invoice so receipts stay correct
     return {
       ...client,
-      office: contract.officeNo || client.office,
+      office: s.office || client.office,
       invoiceType: "rent" as const,
-      amount: inv.amount,
-      // paid in advance — the invoice is due when its cycle starts
-      dueDate: inv.periodStart,
-      monthlyRent: contract.monthlyRent,
-      rentStart: inv.periodStart,
-      rentEnd: inv.periodEnd,
-      rentMonths: contract.paymentMonths || contract.months,
-      status: open
-        ? client.status === "sent"
-          ? ("sent" as const)
-          : ("pending" as const)
-        : ("paid" as const),
-      paidAt: open ? undefined : (inv.paidAt ?? client.paidAt),
+      amount: s.lastPaidAmount,
+      dueDate: "",
+      monthlyRent: s.monthlyRent,
+      rentMonths: s.months,
+      status: "paid" as const,
+      paidAt: s.lastPaidAt ?? client.paidAt,
     };
   });
 }

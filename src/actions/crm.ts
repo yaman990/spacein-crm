@@ -16,6 +16,7 @@ import {
   rowToClient,
   rowToContract,
   rowToInvoice,
+  rowToPayment,
   rowToOfficeDetails,
   rowsToFloors,
 } from "@/lib/supabase/mappers";
@@ -28,6 +29,7 @@ import type {
   Contract,
   Invoice,
   OfficeDetails,
+  Payment,
 } from "@/types/contract";
 import defaultFloors from "@/data/default-floors.json";
 
@@ -39,14 +41,16 @@ import defaultFloors from "@/data/default-floors.json";
 async function fetchContractsResilient(): Promise<{
   contracts: Contract[];
   invoices: Invoice[];
+  payments: Payment[];
   officeDetails: OfficeDetails[];
   building: Building | null;
 }> {
   const supabase = createAdminClient();
-  const [contractsRes, invoicesRes, detailsRes, buildingRes] =
+  const [contractsRes, invoicesRes, paymentsRes, detailsRes, buildingRes] =
     await Promise.all([
       supabase.from("contracts").select("*"),
       supabase.from("invoices").select("*"),
+      supabase.from("payments").select("*"),
       supabase.from("office_details").select("*"),
       supabase.from("buildings").select("*").limit(1),
     ]);
@@ -57,6 +61,9 @@ async function fetchContractsResilient(): Promise<{
     invoices: invoicesRes.error
       ? []
       : (invoicesRes.data ?? []).map(rowToInvoice),
+    payments: paymentsRes.error
+      ? []
+      : (paymentsRes.data ?? []).map(rowToPayment),
     officeDetails: detailsRes.error
       ? []
       : (detailsRes.data ?? []).map(rowToOfficeDetails),
@@ -100,6 +107,7 @@ export async function fetchCrmData(): Promise<{
   floors: FloorsMap;
   contracts: Contract[];
   invoices: Invoice[];
+  payments: Payment[];
   officeDetails: OfficeDetails[];
   building: Building | null;
 }> {
