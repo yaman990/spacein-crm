@@ -205,7 +205,7 @@ function recordToResult(
   fallbackCrNumber: string,
   fallbackBranchNumber: string,
 ): CrLookupResult {
-  const selectedBranch = String(record.BRANCH_NO ?? fallbackBranchNumber || "");
+  const selectedBranch = String(record.BRANCH_NO ?? (fallbackBranchNumber || ""));
 
   return {
     crNumber: String(record.CR_NO ?? fallbackCrNumber),
