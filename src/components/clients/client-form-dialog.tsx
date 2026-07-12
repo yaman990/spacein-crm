@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
 import type { Client } from "@/types/client";
@@ -108,6 +108,13 @@ export function ClientFormDialog({
   const [retrieving, setRetrieving] = useState(false);
   const isEdit = !!client;
 
+  // Re-fill the form each time the dialog opens. This runs even when the parent
+  // controls `open` (the Edit button), which doesn't trigger the dialog's own
+  // onOpenChange — without it, editing a client showed an empty "Add" form.
+  useEffect(() => {
+    if (open) setForm(client ? clientToForm(client) : emptyForm());
+  }, [open, client]);
+
   async function handleRetrieve() {
     if (!form.rank.trim()) {
       toast.error("Enter the CR number first");
@@ -136,9 +143,6 @@ export function ClientFormDialog({
   }
 
   function handleOpenChange(next: boolean) {
-    if (next) {
-      setForm(client ? clientToForm(client) : emptyForm());
-    }
     onOpenChange(next);
   }
 
