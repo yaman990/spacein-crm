@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Printer } from "lucide-react";
 import { useCrm } from "@/providers/crm-provider";
+import { openInvoiceRecordPrint } from "@/lib/document-print";
 import { bhd, fmtDate } from "@/lib/format";
 import type { Invoice } from "@/types/contract";
 import { InvoiceRow } from "@/components/contracts/contract-detail-dialog";
@@ -251,14 +253,29 @@ export function InvoicesView() {
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant={r.remaining > 0 ? "default" : "outline"}
-                        className="h-7"
-                        onClick={() => setSelectedId(r.inv.id)}
-                      >
-                        {r.remaining > 0 ? "Collect" : "View"}
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2"
+                          disabled={!r.client}
+                          aria-label="Print or download invoice"
+                          onClick={() =>
+                            r.client &&
+                            openInvoiceRecordPrint(r.inv, r.contract, r.client)
+                          }
+                        >
+                          <Printer className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant={r.remaining > 0 ? "default" : "outline"}
+                          className="h-7"
+                          onClick={() => setSelectedId(r.inv.id)}
+                        >
+                          {r.remaining > 0 ? "Collect" : "View"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -289,13 +306,33 @@ export function InvoicesView() {
           </DialogHeader>
           <DialogBody>
             {selected ? (
-              <InvoiceRow
-                invoice={selected}
-                payments={payments.filter((p) => p.invoiceId === selected.id)}
-                onMarkPaid={markInvoicePaid}
-                onRecordPayment={recordPayment}
-                getReceiptUrl={getReceiptUrl}
-              />
+              <>
+                {selectedClient && (
+                  <div className="mb-3 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        openInvoiceRecordPrint(
+                          selected,
+                          selectedContract,
+                          selectedClient,
+                        )
+                      }
+                    >
+                      <Printer className="mr-1.5 size-3.5" /> View / download
+                      invoice
+                    </Button>
+                  </div>
+                )}
+                <InvoiceRow
+                  invoice={selected}
+                  payments={payments.filter((p) => p.invoiceId === selected.id)}
+                  onMarkPaid={markInvoicePaid}
+                  onRecordPayment={recordPayment}
+                  getReceiptUrl={getReceiptUrl}
+                />
+              </>
             ) : null}
           </DialogBody>
         </DialogContent>

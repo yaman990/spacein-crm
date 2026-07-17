@@ -1,7 +1,10 @@
-import { buildA4PrintDocument } from "@/lib/invoice-document";
+import {
+  buildA4PrintDocument,
+  buildInvoiceRecordDocument,
+} from "@/lib/invoice-document";
 import { buildContractDocument } from "@/lib/contract-document";
 import type { Client } from "@/types/client";
-import type { Building, Contract } from "@/types/contract";
+import type { Building, Contract, Invoice } from "@/types/contract";
 import type { DocumentType } from "@/lib/invoice-document";
 
 /**
@@ -57,4 +60,12 @@ export function openA4PrintWindow(client: Client, type: DocumentType) {
 
 export function downloadA4Pdf(client: Client, type: DocumentType) {
   openA4PrintWindow(client, type);
+}
+
+export function openInvoiceRecordPrint(
+  invoice: Invoice,
+  contract: Contract | undefined,
+  client: Client,
+) {
+  printHtmlA4(buildInvoiceRecordDocument(invoice, contract, client));
 }

@@ -1,5 +1,6 @@
 import { bhd, fmtDate, todayFormatted } from "@/lib/format";
 import type { Client } from "@/types/client";
+import type { Contract, Invoice } from "@/types/contract";
 
 export type DocumentType = "invoice" | "receipt";
 
@@ -252,6 +253,66 @@ export function buildA4PrintDocument(
 ): string {
   const data = buildInvoiceDocumentData(client, type);
   const body = renderInvoiceDocumentHtml(client, data);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>${data.isReceipt ? "Receipt" : "Invoice"} ${esc(data.docNumber)} — ${esc(client.name)}</title>
+  <style>${A4_PRINT_STYLES}</style>
+</head>
+<body>${body}</body>
+</html>`;
+}
+
+/**
+ * A4 invoice for ONE specific invoice record (a single billing cycle), with its
+ * own period, office and amount — used from the Invoices page. Fully-paid ones
+ * print with a PAID stamp; partial ones note the amount still due.
+ */
+export function buildInvoiceRecordDocument(
+  invoice: Invoice,
+  contract: Contract | undefined,
+  client: Client,
+): string {
+  const paid = invoice.paidAmount || 0;
+  const remaining = Math.max(0, invoice.amount - paid);
+  const fullyPaid = invoice.status !== "void" && remaining <= 0.0005;
+  const office = contract?.officeNo ?? client.office;
+
+  const docClient: Client = {
+    ...client,
+    office,
+    invoiceType: "rent",
+    amount: invoice.amount,
+    monthlyRent: contract?.monthlyRent ?? client.monthlyRent,
+    rentStart: invoice.periodStart,
+    rentEnd: invoice.periodEnd,
+    rentMonths: contract?.paymentMonths || contract?.months || client.rentMonths,
+    paidAt: fullyPaid ? invoice.paidAt : undefined,
+  };
+
+  const note =
+    invoice.status === "void"
+      ? " — WRITTEN OFF"
+      : fullyPaid
+        ? ""
+        : paid > 0
+          ? ` — Paid ${bhd(paid)}, Remaining ${bhd(remaining)}`
+          : "";
+
+  const data: InvoiceDocumentData = {
+    type: fullyPaid ? "receipt" : "invoice",
+    docNumber: `INV-${(contract?.contractNo || invoice.id).toString().toUpperCase().slice(0, 12)}`,
+    dateStr: fullyPaid
+      ? fmtDate((invoice.paidAt || invoice.issuedAt || "").slice(0, 10))
+      : fmtDate((invoice.issuedAt || "").slice(0, 10)),
+    descText: `Office Rent${office ? ` — Office ${office}` : ""} · ${fmtDate(invoice.periodStart)} to ${fmtDate(invoice.periodEnd)}${note}`,
+    amtText: bhd(invoice.amount),
+    isRent: true,
+    isReceipt: fullyPaid,
+  };
+
+  const body = renderInvoiceDocumentHtml(docClient, data);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
