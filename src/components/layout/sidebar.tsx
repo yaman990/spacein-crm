@@ -9,8 +9,10 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  FileText,
   History,
   LayoutDashboard,
+  Receipt,
   Shield,
   Users,
 } from "lucide-react";
@@ -33,6 +35,8 @@ const MOBILE_SHORT_LABELS: Record<string, string> = {
   "/alerts": "Alerts",
   "/offices": "Offices",
   "/contracts": "Contracts",
+  "/invoices": "Invoices",
+  "/reports": "Reports",
   "/history": "History",
   "/settings/admins": "Admin",
 };
@@ -47,6 +51,8 @@ export const navItems: NavItem[] = [
   { href: "/alerts", label: "Reminders", icon: Bell },
   { href: "/offices", label: "Offices", icon: Building2 },
   { href: "/contracts", label: "CR & Contracts", icon: Calendar },
+  { href: "/invoices", label: "Invoices", icon: Receipt },
+  { href: "/reports", label: "Reports", icon: FileText },
   { href: "/history", label: "Activity Log", icon: History },
   {
     href: "/settings/admins",

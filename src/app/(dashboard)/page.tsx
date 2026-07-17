@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { KpiCards, RevenueTicker } from "@/components/dashboard/kpi-cards";
-import { PriorityClientTable } from "@/components/dashboard/priority-table";
+import { DashboardAnalytics } from "@/components/dashboard/dashboard-analytics";
 
 export default function DashboardPage() {
   return (
@@ -11,7 +11,7 @@ export default function DashboardPage() {
       />
       <RevenueTicker />
       <KpiCards />
-      <PriorityClientTable />
+      <DashboardAnalytics />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Pencil, Trash2, CheckCircle2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Pencil, Trash2, CheckCircle2, Receipt } from "lucide-react";
 import { toast } from "sonner";
 import type { Client } from "@/types/client";
 import { useClients } from "@/providers/crm-provider";
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button";
 
 export function ClientRowActions({ client }: { client: Client }) {
   const { deleteClient, markPaid } = useClients();
+  const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const status = statusOf(client);
@@ -45,6 +47,17 @@ export function ClientRowActions({ client }: { client: Client }) {
     <>
       <div className="flex flex-wrap justify-end gap-1">
         <ClientCommsActions client={client} compact />
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2"
+          disabled={busy}
+          aria-label={`Invoices for ${client.name}`}
+          onClick={() => router.push(`/invoices?client=${client.id}`)}
+        >
+          <Receipt className="size-3.5" />
+          <span className="sr-only">View invoices</span>
+        </Button>
         <Button
           size="sm"
           variant="outline"

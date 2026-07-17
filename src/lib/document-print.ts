@@ -11,7 +11,7 @@ import type { DocumentType } from "@/lib/invoice-document";
  * (The previous window.open("", "_blank", "noopener") approach returned null
  * because of the noopener flag, leaving a blank tab that never got content.)
  */
-function printHtmlA4(html: string) {
+export function printHtmlA4(html: string) {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("aria-hidden", "true");
   iframe.style.position = "fixed";
