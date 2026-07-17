@@ -1,6 +1,7 @@
 import {
   buildA4PrintDocument,
   buildInvoiceRecordDocument,
+  buildMultiInvoiceRecordDocument,
 } from "@/lib/invoice-document";
 import { buildContractDocument } from "@/lib/contract-document";
 import type { Client } from "@/types/client";
@@ -68,4 +69,12 @@ export function openInvoiceRecordPrint(
   client: Client,
 ) {
   printHtmlA4(buildInvoiceRecordDocument(invoice, contract, client));
+}
+
+export function openMultiInvoicePrint(
+  items: { invoice: Invoice; contract?: Contract }[],
+  client: Client,
+) {
+  if (items.length === 0) return;
+  printHtmlA4(buildMultiInvoiceRecordDocument(items, client));
 }

@@ -269,7 +269,8 @@ export function buildA4PrintDocument(
  * own period, office and amount — used from the Invoices page. Fully-paid ones
  * print with a PAID stamp; partial ones note the amount still due.
  */
-export function buildInvoiceRecordDocument(
+/** The A4 body (one `.doc-page`) for a single invoice record — no HTML shell. */
+export function renderInvoiceRecordBody(
   invoice: Invoice,
   contract: Contract | undefined,
   client: Client,
@@ -312,14 +313,48 @@ export function buildInvoiceRecordDocument(
     isReceipt: fullyPaid,
   };
 
-  const body = renderInvoiceDocumentHtml(docClient, data);
+  return renderInvoiceDocumentHtml(docClient, data);
+}
+
+function docShell(title: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>${data.isReceipt ? "Receipt" : "Invoice"} ${esc(data.docNumber)} — ${esc(client.name)}</title>
+  <title>${esc(title)}</title>
   <style>${A4_PRINT_STYLES}</style>
 </head>
 <body>${body}</body>
 </html>`;
+}
+
+export function buildInvoiceRecordDocument(
+  invoice: Invoice,
+  contract: Contract | undefined,
+  client: Client,
+): string {
+  const remaining = Math.max(0, invoice.amount - (invoice.paidAmount || 0));
+  const label =
+    invoice.status !== "void" && remaining <= 0.0005 ? "Receipt" : "Invoice";
+  return docShell(
+    `${label} — ${client.name}`,
+    renderInvoiceRecordBody(invoice, contract, client),
+  );
+}
+
+/** One PDF holding several of a client's invoices, one per page. */
+export function buildMultiInvoiceRecordDocument(
+  items: { invoice: Invoice; contract?: Contract }[],
+  client: Client,
+): string {
+  const bodies = items.map((it, i) => {
+    const body = renderInvoiceRecordBody(it.invoice, it.contract, client);
+    return i === 0
+      ? body
+      : `<div style="page-break-before: always;">${body}</div>`;
+  });
+  return docShell(
+    `Invoices — ${client.name} (${items.length})`,
+    bodies.join(""),
+  );
 }

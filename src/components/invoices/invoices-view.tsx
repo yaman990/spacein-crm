@@ -5,7 +5,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Printer } from "lucide-react";
 import { useCrm } from "@/providers/crm-provider";
-import { openInvoiceRecordPrint } from "@/lib/document-print";
+import {
+  openInvoiceRecordPrint,
+  openMultiInvoicePrint,
+} from "@/lib/document-print";
 import { bhd, fmtDate } from "@/lib/format";
 import type { Invoice } from "@/types/contract";
 import { InvoiceRow } from "@/components/contracts/contract-detail-dialog";
@@ -156,12 +159,27 @@ export function InvoicesView() {
               {focusClient.company || focusClient.name}
             </span>
           </span>
-          <Link
-            href="/invoices"
-            className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
-          >
-            Show all invoices
-          </Link>
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={filtered.length === 0}
+              onClick={() =>
+                openMultiInvoicePrint(
+                  filtered.map((r) => ({ invoice: r.inv, contract: r.contract })),
+                  focusClient,
+                )
+              }
+            >
+              <Printer className="mr-1.5 size-3.5" /> Download all ({filtered.length})
+            </Button>
+            <Link
+              href="/invoices"
+              className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+            >
+              Show all invoices
+            </Link>
+          </div>
         </div>
       )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
