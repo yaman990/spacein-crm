@@ -280,7 +280,7 @@ function checkPdf(file: File): boolean {
   return true;
 }
 
-function InvoiceRow({
+export function InvoiceRow({
   invoice,
   payments,
   onMarkPaid,
