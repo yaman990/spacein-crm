@@ -748,6 +748,18 @@ export async function recordPaymentAction(formData: FormData): Promise<void> {
 }
 
 /** Short-lived signed URL to view/download a receipt. */
+/** Write off a single invoice (mark it void) — removes it from receivables. */
+export async function voidInvoiceAction(invoiceId: string): Promise<void> {
+  await requireSession();
+  if (!invoiceId) throw new Error("Missing invoice");
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("invoices")
+    .update({ status: "void" })
+    .eq("id", invoiceId);
+  if (error) throw new Error(error.message);
+}
+
 export async function getReceiptUrlAction(
   receiptPath: string,
 ): Promise<string | null> {

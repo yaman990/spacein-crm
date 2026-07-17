@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Printer } from "lucide-react";
+import { toast } from "sonner";
 import { useCrm } from "@/providers/crm-provider";
 import {
   openInvoiceRecordPrint,
@@ -34,10 +35,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-type Filter = "owing" | "overdue" | "closed" | "paid" | "all";
+type Filter =
+  | "owing"
+  | "due-soon"
+  | "overdue"
+  | "closed"
+  | "paid"
+  | "all";
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "owing", label: "Owing" },
+  { value: "due-soon", label: "Due soon (30d)" },
   { value: "overdue", label: "Overdue" },
   { value: "closed", label: "Closed & owing" },
   { value: "paid", label: "Paid" },
@@ -52,10 +60,30 @@ export function InvoicesView() {
     clients,
     markInvoicePaid,
     recordPayment,
+    voidInvoice,
     getReceiptUrl,
     isHydrated,
   } = useCrm();
+
+  async function handleVoid(id: string) {
+    if (
+      !window.confirm(
+        "Write off this invoice? It's removed from what the client owes (and from all totals).",
+      )
+    )
+      return;
+    try {
+      await voidInvoice(id);
+      toast.success("Invoice written off");
+      setSelectedId(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Write-off failed");
+    }
+  }
   const today = new Date().toISOString().slice(0, 10);
+  const horizonDate = new Date(today + "T00:00:00Z");
+  horizonDate.setUTCDate(horizonDate.getUTCDate() + 30);
+  const horizon = horizonDate.toISOString().slice(0, 10);
   const searchParams = useSearchParams();
   const clientId = searchParams.get("client");
   const [filter, setFilter] = useState<Filter>(clientId ? "all" : "owing");
@@ -125,6 +153,16 @@ export function InvoicesView() {
     const query = q.toLowerCase().trim();
     return scoped.filter((r) => {
       if (filter === "owing" && !(r.remaining > 0)) return false;
+      if (
+        filter === "due-soon" &&
+        !(
+          r.remaining > 0 &&
+          !!r.inv.periodStart &&
+          r.inv.periodStart >= today &&
+          r.inv.periodStart <= horizon
+        )
+      )
+        return false;
       if (filter === "overdue" && !r.overdue) return false;
       if (filter === "closed" && !(r.isClosed && r.remaining > 0)) return false;
       if (filter === "paid" && r.inv.status !== "paid") return false;
@@ -135,7 +173,7 @@ export function InvoicesView() {
       }
       return true;
     });
-  }, [scoped, filter, q]);
+  }, [scoped, filter, q, today, horizon]);
 
   const selected = selectedId
     ? invoices.find((i) => i.id === selectedId)
@@ -325,8 +363,19 @@ export function InvoicesView() {
           <DialogBody>
             {selected ? (
               <>
-                {selectedClient && (
-                  <div className="mb-3 flex justify-end">
+                <div className="mb-3 flex flex-wrap justify-end gap-2">
+                  {selected.status !== "void" &&
+                    selected.amount - (selected.paidAmount || 0) > 0.0005 && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => handleVoid(selected.id)}
+                      >
+                        Write off
+                      </Button>
+                    )}
+                  {selectedClient && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -341,8 +390,8 @@ export function InvoicesView() {
                       <Printer className="mr-1.5 size-3.5" /> View / download
                       invoice
                     </Button>
-                  </div>
-                )}
+                  )}
+                </div>
                 <InvoiceRow
                   invoice={selected}
                   payments={payments.filter((p) => p.invoiceId === selected.id)}

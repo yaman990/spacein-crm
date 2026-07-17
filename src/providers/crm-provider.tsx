@@ -28,6 +28,7 @@ import {
   getReceiptUrlAction,
   markInvoicePaidAction,
   recordPaymentAction,
+  voidInvoiceAction,
   renewContractAction,
   runContractChecksAction,
   saveBuildingAction,
@@ -98,6 +99,7 @@ interface CrmContextValue extends CrmSnapshot {
     receipt: File,
     note?: string,
   ) => Promise<void>;
+  voidInvoice: (invoiceId: string) => Promise<void>;
   getReceiptUrl: (receiptPath: string) => Promise<string | null>;
   renewContract: (contractId: string) => Promise<void>;
   closeContract: (contractId: string, writeOffUnpaid?: boolean) => Promise<void>;
@@ -297,6 +299,14 @@ export function CrmProvider({
     [refresh],
   );
 
+  const voidInvoice = useCallback(
+    async (invoiceId: string) => {
+      await voidInvoiceAction(invoiceId);
+      await refresh();
+    },
+    [refresh],
+  );
+
   const getReceiptUrl = useCallback(
     (invoiceId: string) => getReceiptUrlAction(invoiceId),
     [],
@@ -362,6 +372,7 @@ export function CrmProvider({
       saveBuilding,
       markInvoicePaid,
       recordPayment,
+      voidInvoice,
       getReceiptUrl,
       renewContract,
       closeContract,
@@ -396,6 +407,7 @@ export function CrmProvider({
       saveBuilding,
       markInvoicePaid,
       recordPayment,
+      voidInvoice,
       getReceiptUrl,
       renewContract,
       closeContract,

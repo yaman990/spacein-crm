@@ -30,7 +30,18 @@ export function overlayClientBilling(
 
   return clients.map((client) => {
     const s = summary.get(client.id);
-    if (!s) return client; // no live contract → keep stored legacy values
+    if (!s) {
+      // No contract or invoices at all — don't carry over any imported legacy
+      // amount/due date, which otherwise showed as a phantom "overdue" on
+      // clients that have no active lease. Money totals come from invoices,
+      // so clearing this display value is safe.
+      return {
+        ...client,
+        amount: 0,
+        dueDate: "",
+        status: client.status === "paid" ? "paid" : "pending",
+      };
+    }
 
     if (s.openCount > 0) {
       return {
