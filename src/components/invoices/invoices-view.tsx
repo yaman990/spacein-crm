@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCrm } from "@/providers/crm-provider";
 import { bhd, fmtDate } from "@/lib/format";
 import type { Invoice } from "@/types/contract";
@@ -49,7 +51,9 @@ export function InvoicesView() {
     isHydrated,
   } = useCrm();
   const today = new Date().toISOString().slice(0, 10);
-  const [filter, setFilter] = useState<Filter>("owing");
+  const searchParams = useSearchParams();
+  const clientId = searchParams.get("client");
+  const [filter, setFilter] = useState<Filter>(clientId ? "all" : "owing");
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -93,21 +97,28 @@ export function InvoicesView() {
       });
   }, [invoices, contractById, clientById, today]);
 
+  const focusClient = clientId ? clientById.get(clientId) : null;
+  const scoped = useMemo(
+    () =>
+      clientId ? rows.filter((r) => r.contract?.clientId === clientId) : rows,
+    [rows, clientId],
+  );
+
   const totals = useMemo(() => {
     let outstanding = 0;
     let overdue = 0;
     let collected = 0;
-    for (const r of rows) {
+    for (const r of scoped) {
       collected += r.inv.paidAmount || 0;
       outstanding += r.remaining;
       if (r.overdue) overdue += r.remaining;
     }
     return { outstanding, overdue, collected };
-  }, [rows]);
+  }, [scoped]);
 
   const filtered = useMemo(() => {
     const query = q.toLowerCase().trim();
-    return rows.filter((r) => {
+    return scoped.filter((r) => {
       if (filter === "owing" && !(r.remaining > 0)) return false;
       if (filter === "overdue" && !r.overdue) return false;
       if (filter === "closed" && !(r.isClosed && r.remaining > 0)) return false;
@@ -119,7 +130,7 @@ export function InvoicesView() {
       }
       return true;
     });
-  }, [rows, filter, q]);
+  }, [scoped, filter, q]);
 
   const selected = selectedId
     ? invoices.find((i) => i.id === selectedId)
@@ -135,6 +146,22 @@ export function InvoicesView() {
 
   return (
     <div className="space-y-4">
+      {focusClient && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">
+          <span>
+            Showing invoices for{" "}
+            <span className="font-semibold">
+              {focusClient.company || focusClient.name}
+            </span>
+          </span>
+          <Link
+            href="/invoices"
+            className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Show all invoices
+          </Link>
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Stat label="Outstanding" value={bhd(totals.outstanding)} tone="warn" />
         <Stat label="Overdue" value={bhd(totals.overdue)} tone="crit" />
