@@ -9,6 +9,7 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  FileText,
   History,
   LayoutDashboard,
   Receipt,
@@ -35,6 +36,7 @@ const MOBILE_SHORT_LABELS: Record<string, string> = {
   "/offices": "Offices",
   "/contracts": "Contracts",
   "/invoices": "Invoices",
+  "/reports": "Reports",
   "/history": "History",
   "/settings/admins": "Admin",
 };
@@ -50,6 +52,7 @@ export const navItems: NavItem[] = [
   { href: "/offices", label: "Offices", icon: Building2 },
   { href: "/contracts", label: "CR & Contracts", icon: Calendar },
   { href: "/invoices", label: "Invoices", icon: Receipt },
+  { href: "/reports", label: "Reports", icon: FileText },
   { href: "/history", label: "Activity Log", icon: History },
   {
     href: "/settings/admins",
