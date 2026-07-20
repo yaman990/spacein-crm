@@ -376,6 +376,100 @@ export async function saveFloorsAction(floors: FloorsMap): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+export interface ResetSummary {
+  clients: number;
+  contracts: number;
+  invoices: number;
+  payments: number;
+  offices: number;
+}
+
+/**
+ * DESTRUCTIVE — admin only. Deletes every client, contract, invoice and payment
+ * and empties all offices (occupancy flags reset; restricted offices are kept
+ * restricted). The office layout, rates, building, users and settings stay.
+ * Requires the exact confirmation phrase.
+ */
+export async function resetBusinessDataAction(
+  confirm: string,
+): Promise<ResetSummary> {
+  const session = await requireSession();
+  if (session.user.role !== "admin") throw new Error("Admin only");
+  if (confirm !== "RESET DATA")
+    throw new Error('Type "RESET DATA" to confirm.');
+
+  const supabase = createAdminClient();
+
+  const countOf = async (table: string) => {
+    const { count } = await supabase
+      .from(table)
+      .select("*", { count: "exact", head: true });
+    return count ?? 0;
+  };
+  const summary: ResetSummary = {
+    clients: await countOf("clients"),
+    contracts: await countOf("contracts"),
+    invoices: await countOf("invoices"),
+    payments: await countOf("payments"),
+    offices: 0,
+  };
+
+  // Clear all deal data (order avoids leaving orphans mid-way).
+  for (const table of ["payments", "invoices", "contracts", "clients"]) {
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .not("id", "is", null);
+    if (error) throw new Error(`${table}: ${error.message}`);
+  }
+  await supabase.from("activity_log").delete().not("id", "is", null);
+  // Drop per-office rented/company overrides, but keep "restricted" ones.
+  await supabase.from("office_overrides").delete().neq("value", "restricted");
+  await supabase.from("crm_settings").delete().eq("key", "contract_reminders");
+
+  // Empty every office: reset occupancy flags on the floor plan, keep structure.
+  const { data: settingsRows } = await supabase
+    .from("crm_settings")
+    .select("key, value");
+  const floors = rowsToFloors(
+    (settingsRows ?? []).map((r) => ({
+      key: r.key,
+      value: r.value as FloorsMap,
+    })),
+    defaultFloors as FloorsMap,
+  );
+  const reset: FloorsMap = {};
+  for (const [fk, floor] of Object.entries(floors)) {
+    reset[fk] = {
+      ...floor,
+      sections: floor.sections.map((sec) => ({
+        ...sec,
+        offices: sec.offices.map((o) => {
+          summary.offices++;
+          return {
+            ...o,
+            st: o.st === "restricted" ? ("restricted" as const) : ("unrented" as const),
+            co: "",
+          };
+        }),
+      })),
+    };
+  }
+  const { error: fErr } = await supabase
+    .from("crm_settings")
+    .upsert({ key: "floors", value: reset }, { onConflict: "key" });
+  if (fErr) throw new Error(fErr.message);
+
+  await logActivity(
+    "created",
+    "",
+    session.user.name ?? "",
+    `Business data reset — cleared ${summary.clients} clients, ${summary.contracts} contracts, ${summary.invoices} invoices; offices emptied`,
+  );
+
+  return summary;
+}
+
 export async function recordDocumentAction(
   id: string,
   type: "invoice" | "receipt",
