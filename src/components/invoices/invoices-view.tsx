@@ -137,6 +137,33 @@ export function InvoicesView() {
     [rows, clientId],
   );
 
+  // Earlier unpaid cycles for the same client, so a printed invoice carries the
+  // prior balance forward and totals everything owed — not just this month.
+  // A composite (period, id) key gives a strict total order: same-period
+  // siblings (two offices billed the same month) still carry exactly once with
+  // no double-count, and the client's latest invoice sums to their Outstanding.
+  const priorUnpaidFor = (inv: Invoice, ownerId: string | undefined) => {
+    if (!ownerId) return [];
+    // Sentinel keeps a missing period sorting first (earliest), so a legacy
+    // null-period invoice still carries and matches the Outstanding total.
+    const key = (i: Invoice) => `${i.periodStart || "0000-00-00"}|${i.id}`;
+    const cur = key(inv);
+    return rows
+      .filter(
+        (r) =>
+          r.contract?.clientId === ownerId &&
+          r.remaining > 0.0005 &&
+          key(r.inv) < cur,
+      )
+      .map((r) => ({
+        periodStart: r.inv.periodStart,
+        periodEnd: r.inv.periodEnd,
+        remaining: r.remaining,
+        officeNo: r.office === "—" ? "" : r.office,
+        partial: (r.inv.paidAmount || 0) > 0,
+      }));
+  };
+
   const totals = useMemo(() => {
     let outstanding = 0;
     let overdue = 0;
@@ -184,6 +211,21 @@ export function InvoicesView() {
   const selectedClient = selectedContract
     ? clientById.get(selectedContract.clientId)
     : undefined;
+  const selectedRemaining = selected
+    ? Math.max(0, selected.amount - (selected.paidAmount || 0))
+    : 0;
+  // Only an open (non-void, still-owing) invoice carries a prior balance
+  // forward — so gate the note on the same condition the printed doc uses.
+  const selectedCarries =
+    !!selected && selected.status !== "void" && selectedRemaining > 0.0005;
+  const selectedPrior =
+    selectedCarries && selectedContract
+      ? priorUnpaidFor(selected, selectedContract.clientId)
+      : [];
+  const selectedPriorTotal = selectedPrior.reduce(
+    (s, p) => s + p.remaining,
+    0,
+  );
 
   if (!isHydrated) return <Skeleton className="h-96 w-full rounded-xl" />;
 
@@ -318,7 +360,12 @@ export function InvoicesView() {
                           aria-label="Print or download invoice"
                           onClick={() =>
                             r.client &&
-                            openInvoiceRecordPrint(r.inv, r.contract, r.client)
+                            openInvoiceRecordPrint(
+                              r.inv,
+                              r.contract,
+                              r.client,
+                              priorUnpaidFor(r.inv, r.contract?.clientId),
+                            )
                           }
                         >
                           <Printer className="size-3.5" />
@@ -363,6 +410,21 @@ export function InvoicesView() {
           <DialogBody>
             {selected ? (
               <>
+                {selectedPriorTotal > 0.0005 && (
+                  <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                    This client has{" "}
+                    <span className="font-semibold">
+                      {bhd(selectedPriorTotal)}
+                    </span>{" "}
+                    in {selectedPrior.length} earlier unpaid invoice
+                    {selectedPrior.length === 1 ? "" : "s"}. The printed invoice
+                    carries it forward — total due{" "}
+                    <span className="font-semibold">
+                      {bhd(selectedPriorTotal + selectedRemaining)}
+                    </span>
+                    .
+                  </div>
+                )}
                 <div className="mb-3 flex flex-wrap justify-end gap-2">
                   {selected.status !== "void" &&
                     selected.amount - (selected.paidAmount || 0) > 0.0005 && (
@@ -384,6 +446,7 @@ export function InvoicesView() {
                           selected,
                           selectedContract,
                           selectedClient,
+                          selectedPrior,
                         )
                       }
                     >

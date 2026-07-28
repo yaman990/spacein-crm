@@ -6,7 +6,7 @@ import {
 import { buildContractDocument } from "@/lib/contract-document";
 import type { Client } from "@/types/client";
 import type { Building, Contract, Invoice } from "@/types/contract";
-import type { DocumentType } from "@/lib/invoice-document";
+import type { CarryForwardItem, DocumentType } from "@/lib/invoice-document";
 
 /**
  * Prints an A4 HTML document through a hidden same-origin iframe. Unlike
@@ -67,8 +67,11 @@ export function openInvoiceRecordPrint(
   invoice: Invoice,
   contract: Contract | undefined,
   client: Client,
+  priorUnpaid: CarryForwardItem[] = [],
 ) {
-  printHtmlA4(buildInvoiceRecordDocument(invoice, contract, client));
+  printHtmlA4(
+    buildInvoiceRecordDocument(invoice, contract, client, priorUnpaid),
+  );
 }
 
 export function openMultiInvoicePrint(

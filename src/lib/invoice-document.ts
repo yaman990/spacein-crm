@@ -71,8 +71,10 @@ function esc(s: string) {
 export function renderInvoiceDocumentHtml(
   client: Client,
   data: InvoiceDocumentData,
+  lineItems?: { desc: string; amount: number }[],
+  opts?: { suppressBanking?: boolean; titleOverride?: string },
 ): string {
-  const title = data.isReceipt ? "Receipt" : "Invoice";
+  const title = opts?.titleOverride ?? (data.isReceipt ? "Receipt" : "Invoice");
   const toLine = [
     client.name,
     client.company ? " — " + client.company : "",
@@ -84,7 +86,34 @@ export function renderInvoiceDocumentHtml(
       ? `<br><small style="color:#555;font-size:10px;">Monthly: ${esc(bhd(client.monthlyRent ?? 0))} x ${client.rentMonths} Months</small>`
       : "";
 
-  const banking = !data.isReceipt
+  // When carry-forward line items are supplied (prior unpaid cycles + the
+  // current one), the table itemises each and TOTAL becomes the sum owed.
+  // Otherwise it falls back to the classic single-line invoice.
+  const itemRowsHtml = lineItems
+    ? lineItems
+        .map(
+          (it, i) => `
+          <tr>
+            <td class="center">${i + 1}</td>
+            <td class="center">${esc(it.desc)}</td>
+            <td class="center bold">${esc(bhd(it.amount))}</td>
+          </tr>`,
+        )
+        .join("")
+    : `
+          <tr>
+            <td class="center">1</td>
+            <td class="center">${esc(data.descText)}${rentBreakdown}</td>
+            <td class="center bold">${esc(data.amtText)}</td>
+          </tr>`;
+  const totalText = lineItems
+    ? bhd(lineItems.reduce((s, it) => s + it.amount, 0))
+    : data.amtText;
+  const totalLabel = lineItems && lineItems.length > 1 ? "TOTAL DUE" : "TOTAL";
+
+  const banking = opts?.suppressBanking
+    ? ""
+    : !data.isReceipt
     ? `
     <div class="center bold underline" style="margin:16px 0 8px;">Payments Methods: Cash or Banking Transfer</div>
     <div class="bold underline" style="margin-bottom:6px;">Banking Transfer Details:</div>
@@ -143,14 +172,10 @@ export function renderInvoiceDocumentHtml(
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td class="center">1</td>
-            <td class="center">${esc(data.descText)}${rentBreakdown}</td>
-            <td class="center bold">${esc(data.amtText)}</td>
-          </tr>
+          ${itemRowsHtml}
           <tr class="total-row">
-            <td colspan="2" class="center bold">TOTAL</td>
-            <td class="center bold">${esc(data.amtText)}</td>
+            <td colspan="2" class="center bold">${totalLabel}</td>
+            <td class="center bold">${esc(totalText)}</td>
           </tr>
         </tbody>
       </table>
@@ -269,11 +294,25 @@ export function buildA4PrintDocument(
  * own period, office and amount — used from the Invoices page. Fully-paid ones
  * print with a PAID stamp; partial ones note the amount still due.
  */
+/**
+ * An earlier unpaid cycle carried forward onto a later invoice, so the bill
+ * handed to the tenant shows the accumulated amount owed — not just this month.
+ */
+export interface CarryForwardItem {
+  periodStart: string;
+  periodEnd: string;
+  remaining: number;
+  officeNo?: string;
+  /** true when the cycle is partly paid — shown as a running balance. */
+  partial?: boolean;
+}
+
 /** The A4 body (one `.doc-page`) for a single invoice record — no HTML shell. */
 export function renderInvoiceRecordBody(
   invoice: Invoice,
   contract: Contract | undefined,
   client: Client,
+  priorUnpaid: CarryForwardItem[] = [],
 ): string {
   const paid = invoice.paidAmount || 0;
   const remaining = Math.max(0, invoice.amount - paid);
@@ -313,7 +352,55 @@ export function renderInvoiceRecordBody(
     isReceipt: fullyPaid,
   };
 
-  return renderInvoiceDocumentHtml(docClient, data);
+  const periodLabel = (s: string, e: string) =>
+    s ? `${fmtDate(s)} to ${fmtDate(e)}` : "earlier period";
+
+  // A written-off invoice must never look payable: a single zeroed "WRITTEN
+  // OFF" line, no bank-transfer block, titled "Written Off".
+  if (invoice.status === "void") {
+    return renderInvoiceDocumentHtml(
+      docClient,
+      data,
+      [
+        {
+          desc: `Office Rent${office ? ` — Office ${office}` : ""} · ${periodLabel(invoice.periodStart, invoice.periodEnd)} — WRITTEN OFF (no payment due)`,
+          amount: 0,
+        },
+      ],
+      { suppressBanking: true, titleOverride: "Written Off" },
+    );
+  }
+
+  // Carry earlier unpaid cycles forward so this invoice totals everything the
+  // tenant owes. A fully-paid record stays a plain receipt (no carry-forward).
+  const carry = fullyPaid
+    ? []
+    : priorUnpaid.filter((p) => p.remaining > 0.0005);
+  if (carry.length === 0) {
+    return renderInvoiceDocumentHtml(docClient, data);
+  }
+
+  const lineItems = [
+    ...carry
+      .slice()
+      .sort((a, b) =>
+        a.periodStart < b.periodStart
+          ? -1
+          : a.periodStart > b.periodStart
+            ? 1
+            : 0,
+      )
+      .map((p) => ({
+        desc: `Office Rent${p.officeNo ? ` — Office ${p.officeNo}` : ""} · ${periodLabel(p.periodStart, p.periodEnd)} — previous ${p.partial ? "balance" : "unpaid"}`,
+        amount: p.remaining,
+      })),
+    {
+      desc: `Office Rent${office ? ` — Office ${office}` : ""} · ${periodLabel(invoice.periodStart, invoice.periodEnd)}${paid > 0 ? " — balance" : ""}`,
+      amount: remaining,
+    },
+  ];
+
+  return renderInvoiceDocumentHtml(docClient, data, lineItems);
 }
 
 function docShell(title: string, body: string): string {
@@ -332,13 +419,18 @@ export function buildInvoiceRecordDocument(
   invoice: Invoice,
   contract: Contract | undefined,
   client: Client,
+  priorUnpaid: CarryForwardItem[] = [],
 ): string {
   const remaining = Math.max(0, invoice.amount - (invoice.paidAmount || 0));
   const label =
-    invoice.status !== "void" && remaining <= 0.0005 ? "Receipt" : "Invoice";
+    invoice.status === "void"
+      ? "Written off"
+      : remaining <= 0.0005
+        ? "Receipt"
+        : "Invoice";
   return docShell(
     `${label} — ${client.name}`,
-    renderInvoiceRecordBody(invoice, contract, client),
+    renderInvoiceRecordBody(invoice, contract, client, priorUnpaid),
   );
 }
 
