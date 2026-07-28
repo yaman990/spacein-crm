@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
 import type { Client } from "@/types/client";
@@ -38,6 +38,7 @@ const schema = z.object({
   name: z.string().min(1, "Name is required"),
   company: z.string(),
   type: z.enum(["individual", "commercial"]),
+  cpr: z.string(),
   authorizedName: z.string(),
   authorizedCpr: z.string(),
   authorizedNationality: z.string(),
@@ -58,6 +59,7 @@ const emptyForm = (): FormState => ({
   name: "",
   company: "",
   type: "commercial",
+  cpr: "",
   authorizedName: "",
   authorizedCpr: "",
   authorizedNationality: "",
@@ -77,6 +79,7 @@ function clientToForm(client: Client): FormState {
     name: client.name,
     company: client.company,
     type: client.type ?? "commercial",
+    cpr: client.cpr ?? "",
     authorizedName: client.authorizedName ?? "",
     authorizedCpr: client.authorizedCpr ?? "",
     authorizedNationality: client.authorizedNationality ?? "",
@@ -108,12 +111,14 @@ export function ClientFormDialog({
   const [retrieving, setRetrieving] = useState(false);
   const isEdit = !!client;
 
-  // Re-fill the form each time the dialog opens. This runs even when the parent
-  // controls `open` (the Edit button), which doesn't trigger the dialog's own
-  // onOpenChange — without it, editing a client showed an empty "Add" form.
-  useEffect(() => {
+  // Re-fill the form each time the dialog opens (works even when the parent
+  // controls `open`, e.g. the row Edit button). Done during render per React's
+  // "reset state when a prop changes" pattern rather than in an effect.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) setForm(client ? clientToForm(client) : emptyForm());
-  }, [open, client]);
+  }
 
   async function handleRetrieve() {
     if (!form.rank.trim()) {
@@ -161,6 +166,10 @@ export function ClientFormDialog({
       toast.error("CR Name is required for commercial clients");
       return;
     }
+    if (parsed.data.type === "individual" && !parsed.data.cpr.trim()) {
+      toast.error("CPR number is required for individual clients");
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -172,6 +181,7 @@ export function ClientFormDialog({
           name: v.name.trim(),
           company: v.company.trim(),
           type: v.type,
+          cpr: v.cpr.trim(),
           authorizedName: v.authorizedName.trim(),
           authorizedCpr: v.authorizedCpr.trim(),
           authorizedNationality: v.authorizedNationality.trim(),
@@ -215,30 +225,36 @@ export function ClientFormDialog({
             onSubmit={handleSubmit}
             className="grid gap-4 sm:grid-cols-2"
           >
-            <Field label="Full Name (contact person) *">
+            <Field
+              label={
+                form.type === "commercial"
+                  ? "Full Name (contact person) *"
+                  : "Full Name *"
+              }
+            >
               <Input
                 value={form.name}
                 onChange={(e) => set("name", e.target.value)}
                 placeholder="Ahmed Al Mansouri"
               />
             </Field>
-            <Field
-              label={
-                form.type === "commercial"
-                  ? "CR Name (registered company) *"
-                  : "Company (optional)"
-              }
-            >
-              <Input
-                value={form.company}
-                onChange={(e) => set("company", e.target.value)}
-                placeholder={
-                  form.type === "commercial"
-                    ? "As written on the Commercial Registration"
-                    : ""
-                }
-              />
-            </Field>
+            {form.type === "commercial" ? (
+              <Field label="CR Name (registered company) *">
+                <Input
+                  value={form.company}
+                  onChange={(e) => set("company", e.target.value)}
+                  placeholder="As written on the Commercial Registration"
+                />
+              </Field>
+            ) : (
+              <Field label="CPR No. *">
+                <Input
+                  value={form.cpr}
+                  onChange={(e) => set("cpr", e.target.value)}
+                  placeholder="National ID — e.g. 890101234"
+                />
+              </Field>
+            )}
             <Field label="Type">
               <Select
                 value={form.type}
@@ -268,57 +284,57 @@ export function ClientFormDialog({
                 onChange={(e) => set("email", e.target.value)}
               />
             </Field>
-            <Field label="CR Number">
-              <div className="flex gap-2">
-                <Input
-                  value={form.rank}
-                  onChange={(e) => set("rank", e.target.value)}
-                  placeholder="e.g. 158007"
-                />
-                {form.type === "commercial" && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={retrieving || !form.rank.trim()}
-                    onClick={handleRetrieve}
-                    className="shrink-0"
-                  >
-                    {retrieving ? "Retrieving…" : "Retrieve"}
-                  </Button>
-                )}
-              </div>
-              {form.type === "commercial" && (
-                <p className="text-[0.7rem] text-muted-foreground">
-                  Fills CR name, expiry &amp; status from Sijilat.
-                </p>
-              )}
-            </Field>
-            <Field label="CR Expiry Date">
-              <Input
-                type="date"
-                value={form.crExpiry}
-                onChange={(e) => set("crExpiry", e.target.value)}
-              />
-            </Field>
-            <Field label="CR Status">
-              <Input
-                value={form.crStatus}
-                onChange={(e) => set("crStatus", e.target.value)}
-                placeholder="Filled from Sijilat"
-              />
-              {form.crStatus && (
-                <p className="flex items-center gap-1.5 text-[0.7rem] text-muted-foreground">
-                  Registry status:
-                  <CrStatusBadge
-                    client={{
-                      crExpiry: form.crExpiry,
-                      crStatus: form.crStatus,
-                    }}
-                    hideNone
+            {form.type === "commercial" && (
+              <>
+                <Field label="CR Number">
+                  <div className="flex gap-2">
+                    <Input
+                      value={form.rank}
+                      onChange={(e) => set("rank", e.target.value)}
+                      placeholder="e.g. 158007"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={retrieving || !form.rank.trim()}
+                      onClick={handleRetrieve}
+                      className="shrink-0"
+                    >
+                      {retrieving ? "Retrieving…" : "Retrieve"}
+                    </Button>
+                  </div>
+                  <p className="text-[0.7rem] text-muted-foreground">
+                    Fills CR name, expiry &amp; status from Sijilat.
+                  </p>
+                </Field>
+                <Field label="CR Expiry Date">
+                  <Input
+                    type="date"
+                    value={form.crExpiry}
+                    onChange={(e) => set("crExpiry", e.target.value)}
                   />
-                </p>
-              )}
-            </Field>
+                </Field>
+                <Field label="CR Status">
+                  <Input
+                    value={form.crStatus}
+                    onChange={(e) => set("crStatus", e.target.value)}
+                    placeholder="Filled from Sijilat"
+                  />
+                  {form.crStatus && (
+                    <p className="flex items-center gap-1.5 text-[0.7rem] text-muted-foreground">
+                      Registry status:
+                      <CrStatusBadge
+                        client={{
+                          crExpiry: form.crExpiry,
+                          crStatus: form.crStatus,
+                        }}
+                        hideNone
+                      />
+                    </p>
+                  )}
+                </Field>
+              </>
+            )}
             {form.type === "commercial" && (
               <div className="col-span-2 space-y-3 rounded-lg border border-border bg-muted/30 p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

@@ -8,6 +8,8 @@ export interface Client {
   /** For commercial clients this is the registered CR name. */
   company: string;
   type?: ClientType;
+  /** For individual clients: their CPR (national ID) number. */
+  cpr?: string;
   /** Authorized signatory — signs contracts on behalf of the CR. */
   authorizedName?: string;
   authorizedCpr?: string;

@@ -172,14 +172,23 @@ function ClientRow({ client }: { client: Client }) {
     <TableRow>
       <TableCell>
         <p className="max-w-[180px] truncate font-semibold">{client.name}</p>
-        {client.rank && client.rank !== "-" && (
-          <p className="font-mono text-[0.65rem] text-muted-foreground">
-            {client.rank}
-          </p>
-        )}
+        {client.type === "individual"
+          ? client.cpr && (
+              <p className="font-mono text-[0.65rem] text-muted-foreground">
+                CPR {client.cpr}
+              </p>
+            )
+          : client.rank &&
+            client.rank !== "-" && (
+              <p className="font-mono text-[0.65rem] text-muted-foreground">
+                {client.rank}
+              </p>
+            )}
       </TableCell>
       <TableCell className="max-w-[160px] truncate text-sm">
-        {client.company || "—"}
+        {client.type === "individual"
+          ? "Individual"
+          : client.company || "—"}
       </TableCell>
       <TableCell>
         {client.office ? (

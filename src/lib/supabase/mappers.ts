@@ -14,6 +14,7 @@ export interface ClientRow {
   name: string;
   company: string;
   type?: string;
+  cpr?: string | null;
   authorized_name?: string | null;
   authorized_cpr?: string | null;
   authorized_nationality?: string | null;
@@ -71,6 +72,7 @@ export function clientToRow(
     name: client.name,
     company: client.company ?? "",
     type: client.type ?? "commercial",
+    cpr: emptyToNull(client.cpr),
     authorized_name: client.authorizedName ?? "",
     authorized_cpr: client.authorizedCpr ?? "",
     authorized_nationality: client.authorizedNationality ?? "",
@@ -102,6 +104,7 @@ export function rowToClient(row: ClientRow): Client {
     name: row.name,
     company: row.company ?? "",
     type: (row.type as ClientType) ?? "commercial",
+    cpr: row.cpr ?? undefined,
     authorizedName: row.authorized_name ?? "",
     authorizedCpr: row.authorized_cpr ?? "",
     authorizedNationality: row.authorized_nationality ?? "",
